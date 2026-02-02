@@ -1,4 +1,5 @@
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, KnownProvider, Model } from "@mariozechner/pi-ai";
+import { getModel, getProviders } from "@mariozechner/pi-ai";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { ModelDefinitionConfig } from "../../config/types.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";
@@ -69,7 +70,29 @@ export function resolveModel(
   const resolvedAgentDir = agentDir ?? resolveOpenClawAgentDir();
   const authStorage = discoverAuthStorage(resolvedAgentDir);
   const modelRegistry = discoverModels(authStorage, resolvedAgentDir);
-  const model = modelRegistry.find(provider, modelId) as Model<Api> | null;
+  let model = modelRegistry.find(provider, modelId) as Model<Api> | null;
+
+  // If registry.find() fails (e.g., for alias IDs like "claude-opus-4-5" vs "claude-opus-4-5-20251101"),
+  // fall back to getModel() which supports model ID aliases in the pi-ai catalog.
+  if (!model) {
+    // getModel requires KnownProvider type - check if provider is known before calling
+    const knownProviders = new Set<string>(getProviders());
+    if (knownProviders.has(provider)) {
+      try {
+        // Use type assertion since we verified provider is in the known list
+        const directModel = getModel(
+          provider as KnownProvider,
+          modelId as never,
+        ) as Model<Api> | null;
+        if (directModel) {
+          model = directModel;
+        }
+      } catch {
+        // getModel throws if model ID is not found in the catalog
+      }
+    }
+  }
+
   if (!model) {
     const providers = cfg?.models?.providers ?? {};
     const inlineModels = buildInlineProviderModels(providers);
