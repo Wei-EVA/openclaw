@@ -4,11 +4,11 @@
 
 ## 你的 Fork 信息
 
-| 项目 | 值 |
-|------|-----|
-| Fork 仓库 | https://github.com/Wei-EVA/openclaw |
-| 分支名称 | `nice-tereshkova` |
-| 上游仓库 | https://github.com/clawdbot/clawdbot |
+| 项目      | 值                                   |
+| --------- | ------------------------------------ |
+| Fork 仓库 | https://github.com/Wei-EVA/openclaw  |
+| 分支名称  | `nice-tereshkova`                    |
+| 上游仓库  | https://github.com/clawdbot/clawdbot |
 
 ## 场景一：完全重装后恢复
 
@@ -91,12 +91,12 @@ git push --force myfork nice-tereshkova
 
 ## 重要文件位置
 
-| 文件/目录 | 用途 |
-|-----------|------|
-| `~/.openclaw/` | 运行时配置和会话数据 |
-| `~/.openclaw/credentials/` | 认证凭据 |
-| `~/.openclaw/sessions/` | Pi 会话记录 |
-| `~/.openclaw/agents/` | Agent 配置和日志 |
+| 文件/目录                  | 用途                 |
+| -------------------------- | -------------------- |
+| `~/.openclaw/`             | 运行时配置和会话数据 |
+| `~/.openclaw/credentials/` | 认证凭据             |
+| `~/.openclaw/sessions/`    | Pi 会话记录          |
+| `~/.openclaw/agents/`      | Agent 配置和日志     |
 
 这些目录不在 git 仓库中，重装后需要重新配置或从备份恢复。
 
@@ -134,3 +134,18 @@ git log myfork/nice-tereshkova..HEAD --oneline
 2. **定期推送到 fork** - 防止本地数据丢失
 3. **合并前先备份** - 在执行 `git merge upstream/main` 前确保本地更改已推送
 4. **冲突解决** - 合并冲突时，你的本地更改优先级更高，但要仔细检查官方更新是否包含重要修复
+
+## 同步历史记录
+
+| 日期       | 上游版本    | 合并提交    | 说明                                                                     |
+| ---------- | ----------- | ----------- | ------------------------------------------------------------------------ |
+| 2026-02-03 | `6b83d82e8` | `a38d29884` | 同步 tsdown 构建迁移（JS 打包速度提升 10x）、git hooks 清理、CI 配置更新 |
+
+### 本地定制提交
+
+| 提交        | 说明                                                                       |
+| ----------- | -------------------------------------------------------------------------- |
+| `7b2c287e6` | fix: support model ID aliases in resolveModel fallback                     |
+| `f7e732ab5` | feat: add defensive audio/video base64 detection to session media stripper |
+| `e75d003e7` | docs: add fork recovery guide (Chinese)                                    |
+| `f10a2fd0a` | docs: use myfork remote in recovery guide                                  |
