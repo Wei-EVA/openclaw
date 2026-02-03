@@ -25,10 +25,13 @@ git checkout nice-tereshkova
 # 3. 添加上游仓库（用于后续同步官方更新）
 git remote add upstream https://github.com/clawdbot/clawdbot.git
 
-# 4. 安装依赖
+# 4. 设置默认推送到你的 fork
+git remote set-url --push origin https://github.com/Wei-EVA/openclaw.git
+
+# 5. 安装依赖
 pnpm install
 
-# 5. 构建项目
+# 6. 构建项目
 pnpm build
 ```
 
@@ -68,7 +71,7 @@ git add .
 git commit -m "merge: sync with upstream"
 
 # 5. 推送到你的 fork
-git push origin nice-tereshkova
+git push myfork nice-tereshkova
 ```
 
 ## 场景四：回滚到特定版本
@@ -83,7 +86,7 @@ git log --oneline -20
 git reset --hard <commit-hash>
 
 # 强制推送到 fork（谨慎使用）
-git push --force origin nice-tereshkova
+git push --force myfork nice-tereshkova
 ```
 
 ## 重要文件位置
@@ -103,7 +106,7 @@ git push --force origin nice-tereshkova
 # 推送本地更改到 fork（建议每次重要修改后执行）
 git add -A
 git commit -m "backup: <描述你的更改>"
-git push origin nice-tereshkova
+git push myfork nice-tereshkova
 
 # 备份运行时配置（可选）
 tar -czvf openclaw-config-backup.tar.gz ~/.openclaw
@@ -122,7 +125,7 @@ git remote -v
 git status
 
 # 查看未推送的提交
-git log origin/nice-tereshkova..HEAD --oneline
+git log myfork/nice-tereshkova..HEAD --oneline
 ```
 
 ## 注意事项
