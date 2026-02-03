@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { SessionManager } from "@mariozechner/pi-coding-agent";
 import { emitSessionTranscriptUpdate } from "../sessions/transcript-events.js";
+import { logImageStripping, stripImagesFromMessage } from "./session-image-stripper.js";
 import { makeMissingToolResult, sanitizeToolCallInputs } from "./session-transcript-repair.js";
 
 type ToolCall = { id: string; name?: string };
@@ -58,6 +59,12 @@ export function installSessionToolResultGuard(
      * Defaults to true.
      */
     allowSyntheticToolResults?: boolean;
+    /**
+     * Whether to strip base64 media (images, audio, video) from messages before persisting to session.
+     * Media data is replaced with text placeholders to save context space.
+     * Defaults to true.
+     */
+    stripMediaFromSession?: boolean;
   },
 ): {
   flushPendingToolResults: () => void;
@@ -75,6 +82,11 @@ export function installSessionToolResultGuard(
   };
 
   const allowSyntheticToolResults = opts?.allowSyntheticToolResults ?? true;
+  // Support both new name (stripMediaFromSession) and legacy name (stripImagesFromSession)
+  const stripMedia =
+    opts?.stripMediaFromSession ??
+    (opts as { stripImagesFromSession?: boolean })?.stripImagesFromSession ??
+    true;
 
   const flushPendingToolResults = () => {
     if (pending.size === 0) {
@@ -96,10 +108,20 @@ export function installSessionToolResultGuard(
   };
 
   const guardedAppend = (message: AgentMessage) => {
-    let nextMessage = message;
-    const role = (message as { role?: unknown }).role;
+    // Strip base64 media (images, audio, video) before any persistence
+    const { message: strippedMessage, strippedCount } = stripImagesFromMessage(message, stripMedia);
+    const role = (strippedMessage as { role?: string }).role;
+
+    // Log with sampling (avoids spam)
+    if (strippedCount > 0) {
+      logImageStripping(role, strippedCount);
+    }
+
+    let nextMessage = strippedMessage;
+
+    // Sanitize assistant tool call inputs
     if (role === "assistant") {
-      const sanitized = sanitizeToolCallInputs([message]);
+      const sanitized = sanitizeToolCallInputs([nextMessage]);
       if (sanitized.length === 0) {
         if (allowSyntheticToolResults && pending.size > 0) {
           flushPendingToolResults();
@@ -160,6 +182,8 @@ export function installSessionToolResultGuard(
   };
 
   // Monkey-patch appendMessage with our guarded version.
+  // Note: Only log on first install, not on every message
+  console.log("[session-tool-result-guard] Guard installed, stripMedia:", stripMedia);
   sessionManager.appendMessage = guardedAppend as SessionManager["appendMessage"];
 
   return {

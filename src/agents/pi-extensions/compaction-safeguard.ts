@@ -14,6 +14,39 @@ import {
 import { getCompactionSafeguardRuntime } from "./compaction-safeguard-runtime.js";
 const FALLBACK_SUMMARY =
   "Summary unavailable due to context limits. Older messages were truncated.";
+
+// ============================================================================
+// Oversized message filter (added 2026-01-28 for image protection)
+// Filter out messages that exceed 80% of context window to prevent compaction failure
+// ============================================================================
+
+function filterOversized(
+  messages: AgentMessage[],
+  contextWindowTokens: number,
+  label: string,
+): { filtered: AgentMessage[]; droppedCount: number } {
+  const maxTokensPerMessage = Math.floor(contextWindowTokens * 0.8);
+  const filtered: AgentMessage[] = [];
+  let droppedCount = 0;
+
+  for (const msg of messages) {
+    const msgTokens = estimateMessagesTokens([msg]);
+    if (msgTokens > maxTokensPerMessage) {
+      droppedCount++;
+      console.warn(
+        `[compaction-safeguard] Dropping oversized ${label} message: ` +
+          `${msgTokens} tokens > ${maxTokensPerMessage} (80% of ${contextWindowTokens})`,
+      );
+    } else {
+      filtered.push(msg);
+    }
+  }
+
+  return { filtered, droppedCount };
+}
+
+// ============================================================================
+
 const TURN_PREFIX_INSTRUCTIONS =
   "This summary covers the prefix of a split turn. Focus on the original request," +
   " early progress, and any details needed to understand the retained suffix.";
@@ -268,8 +301,21 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
         }
       }
 
+      // Filter oversized messages before summarization to prevent failures
+      const { filtered: filteredMessagesToSummarize, droppedCount: droppedMain } = filterOversized(
+        messagesToSummarize,
+        contextWindowTokens,
+        "messagesToSummarize",
+      );
+      const { filtered: filteredTurnPrefixMessages, droppedCount: droppedPrefix } = filterOversized(
+        turnPrefixMessages,
+        contextWindowTokens,
+        "turnPrefixMessages",
+      );
+      const totalDropped = droppedMain + droppedPrefix;
+
       // Use adaptive chunk ratio based on message sizes
-      const allMessages = [...messagesToSummarize, ...turnPrefixMessages];
+      const allMessages = [...filteredMessagesToSummarize, ...filteredTurnPrefixMessages];
       const adaptiveRatio = computeAdaptiveChunkRatio(allMessages, contextWindowTokens);
       const maxChunkTokens = Math.max(1, Math.floor(contextWindowTokens * adaptiveRatio));
       const reserveTokens = Math.max(1, Math.floor(preparation.settings.reserveTokens));
@@ -279,7 +325,7 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
       const effectivePreviousSummary = droppedSummary ?? preparation.previousSummary;
 
       const historySummary = await summarizeInStages({
-        messages: messagesToSummarize,
+        messages: filteredMessagesToSummarize,
         model,
         apiKey,
         signal,
@@ -291,9 +337,9 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
       });
 
       let summary = historySummary;
-      if (preparation.isSplitTurn && turnPrefixMessages.length > 0) {
+      if (preparation.isSplitTurn && filteredTurnPrefixMessages.length > 0) {
         const prefixSummary = await summarizeInStages({
-          messages: turnPrefixMessages,
+          messages: filteredTurnPrefixMessages,
           model,
           apiKey,
           signal,
@@ -308,6 +354,11 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
 
       summary += toolFailureSection;
       summary += fileOpsSummary;
+
+      // Add note about dropped oversized messages
+      if (totalDropped > 0) {
+        summary += `\n\n[Note: ${totalDropped} oversized message(s) were dropped from summarization to prevent context overflow]`;
+      }
 
       return {
         compaction: {
