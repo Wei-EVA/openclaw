@@ -189,24 +189,78 @@ export async function monitorWebChannel(
       return !hasControlCommand(msg.body, cfg);
     };
 
-    const listener = await (listenerFactory ?? monitorWebInbox)({
-      verbose,
-      accountId: account.accountId,
-      authDir: account.authDir,
-      mediaMaxMb: account.mediaMaxMb,
-      sendReadReceipts: account.sendReadReceipts,
-      debounceMs: inboundDebounceMs,
-      shouldDebounce,
-      onMessage: async (msg: WebInboundMsg) => {
-        handledMessages += 1;
-        lastMessageAt = Date.now();
-        status.lastMessageAt = lastMessageAt;
-        status.lastEventAt = lastMessageAt;
-        emitStatus();
-        _lastInboundMsg = msg;
-        await onMessage(msg);
-      },
-    });
+    let listener;
+    try {
+      listener = await (listenerFactory ?? monitorWebInbox)({
+        verbose,
+        accountId: account.accountId,
+        authDir: account.authDir,
+        mediaMaxMb: account.mediaMaxMb,
+        sendReadReceipts: account.sendReadReceipts,
+        debounceMs: inboundDebounceMs,
+        shouldDebounce,
+        onMessage: async (msg: WebInboundMsg) => {
+          handledMessages += 1;
+          lastMessageAt = Date.now();
+          status.lastMessageAt = lastMessageAt;
+          status.lastEventAt = lastMessageAt;
+          emitStatus();
+          _lastInboundMsg = msg;
+          await onMessage(msg);
+        },
+      });
+    } catch (err) {
+      // Connection failed during setup (e.g., DNS resolution error).
+      // Treat this as a disconnect and enter the retry loop instead of exiting.
+      const errorStr = formatError(err);
+
+      status.connected = false;
+      status.lastDisconnect = {
+        at: Date.now(),
+        status: 0,
+        error: errorStr,
+        loggedOut: false,
+      };
+      status.lastError = errorStr;
+      status.lastEventAt = status.lastDisconnect.at;
+      emitStatus();
+
+      reconnectLogger.warn(
+        { connectionId, error: errorStr, reconnectAttempts },
+        "web reconnect: connection setup failed",
+      );
+
+      reconnectAttempts += 1;
+      status.reconnectAttempts = reconnectAttempts;
+      emitStatus();
+
+      if (reconnectPolicy.maxAttempts > 0 && reconnectAttempts >= reconnectPolicy.maxAttempts) {
+        reconnectLogger.warn(
+          { connectionId, reconnectAttempts, maxAttempts: reconnectPolicy.maxAttempts },
+          "web reconnect: max attempts reached during setup; stopping",
+        );
+        // Avoid noisy runtime.error() spam; leave details in logs/status.
+        break;
+      }
+
+      const delay = computeBackoff(reconnectPolicy, reconnectAttempts);
+      reconnectLogger.info(
+        {
+          connectionId,
+          reconnectAttempts,
+          maxAttempts: reconnectPolicy.maxAttempts || "unlimited",
+          delayMs: delay,
+        },
+        "web reconnect: scheduling retry after setup failure",
+      );
+
+      try {
+        await sleep(delay, abortSignal);
+      } catch {
+        break;
+      }
+      continue;
+    }
 
     status.connected = true;
     status.lastConnectedAt = Date.now();
