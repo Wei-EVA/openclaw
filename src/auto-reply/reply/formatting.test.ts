@@ -85,7 +85,8 @@ describe("block reply coalescer", () => {
     coalescer.enqueue({ text: "Second paragraph" });
     coalescer.enqueue({ text: "Third paragraph" });
 
-    await Promise.resolve();
+    // Wait for the flush chain to complete all queued operations
+    await coalescer.flush({ force: true });
     expect(flushes).toEqual(["First paragraph", "Second paragraph", "Third paragraph"]);
     coalescer.stop();
   });
@@ -120,7 +121,8 @@ describe("block reply coalescer", () => {
     });
 
     coalescer.enqueue({ text: "Hi" });
-    await Promise.resolve();
+    // Wait for the flush chain to complete
+    await coalescer.flush({ force: true });
     expect(flushes).toEqual(["Hi"]);
     coalescer.stop();
   });
@@ -139,14 +141,15 @@ describe("block reply coalescer", () => {
     coalescer.enqueue({ text: "12345678901234567890" });
     coalescer.enqueue({ text: "abcdefghijklmnopqrst" });
 
-    await Promise.resolve();
+    // Wait for the flush chain to complete all queued operations
+    await coalescer.flush({ force: true });
     // Without flushOnEnqueue, these would be joined to 40+ chars and trigger maxChars split.
     // With flushOnEnqueue, each is sent independently within budget.
     expect(flushes).toEqual(["12345678901234567890", "abcdefghijklmnopqrst"]);
     coalescer.stop();
   });
 
-  it("flushes buffered text before media payloads", () => {
+  it("flushes buffered text before media payloads", async () => {
     const flushes: Array<{ text?: string; mediaUrls?: string[] }> = [];
     const coalescer = createBlockReplyCoalescer({
       config: { minChars: 1, maxChars: 200, idleMs: 0, joiner: " " },
@@ -162,7 +165,8 @@ describe("block reply coalescer", () => {
     coalescer.enqueue({ text: "Hello" });
     coalescer.enqueue({ text: "world" });
     coalescer.enqueue({ mediaUrls: ["https://example.com/a.png"] });
-    void coalescer.flush({ force: true });
+    // Wait for the flush chain to complete all queued operations
+    await coalescer.flush({ force: true });
 
     expect(flushes[0].text).toBe("Hello world");
     expect(flushes[1].mediaUrls).toEqual(["https://example.com/a.png"]);

@@ -1,5 +1,6 @@
 import type { ReplyPayload } from "../types.js";
 import type { BlockStreamingCoalescing } from "./block-streaming.js";
+import { logVerbose } from "../../globals.js";
 
 export type BlockReplyCoalescer = {
   enqueue: (payload: ReplyPayload) => void;
@@ -24,6 +25,8 @@ export function createBlockReplyCoalescer(params: {
   let bufferReplyToId: ReplyPayload["replyToId"];
   let bufferAudioAsVoice: ReplyPayload["audioAsVoice"];
   let idleTimer: NodeJS.Timeout | undefined;
+  // Track pending flush operations to ensure they complete before new operations
+  let flushChain: Promise<void> = Promise.resolve();
 
   const clearIdleTimer = () => {
     if (!idleTimer) {
@@ -45,11 +48,16 @@ export function createBlockReplyCoalescer(params: {
     }
     clearIdleTimer();
     idleTimer = setTimeout(() => {
-      void flush({ force: false });
+      // Chain the idle flush to preserve ordering
+      flushChain = flushChain
+        .then(() => flushInternal({ force: false }))
+        .catch((err) => {
+          logVerbose(`block-reply-coalescer: idle flush error: ${String(err)}`);
+        });
     }, idleMs);
   };
 
-  const flush = async (options?: { force?: boolean }) => {
+  const flushInternal = async (options?: { force?: boolean }) => {
     clearIdleTimer();
     if (shouldAbort()) {
       resetBuffer();
@@ -71,6 +79,24 @@ export function createBlockReplyCoalescer(params: {
     await onFlush(payload);
   };
 
+  const flush = async (options?: { force?: boolean }) => {
+    // Chain flush operations to ensure proper ordering
+    const flushPromise = flushChain.then(() => flushInternal(options));
+    flushChain = flushPromise.catch((err) => {
+      logVerbose(`block-reply-coalescer: flush error: ${String(err)}`);
+    });
+    await flushPromise;
+  };
+
+  // Helper to chain onFlush calls through the flush chain for proper ordering
+  const chainedOnFlush = (payload: ReplyPayload) => {
+    flushChain = flushChain
+      .then(() => onFlush(payload))
+      .catch((err) => {
+        logVerbose(`block-reply-coalescer: onFlush error: ${String(err)}`);
+      });
+  };
+
   const enqueue = (payload: ReplyPayload) => {
     if (shouldAbort()) {
       return;
@@ -79,8 +105,13 @@ export function createBlockReplyCoalescer(params: {
     const text = payload.text ?? "";
     const hasText = text.trim().length > 0;
     if (hasMedia) {
-      void flush({ force: true });
-      void onFlush(payload);
+      // Chain media payload through flush chain to preserve ordering
+      flushChain = flushChain
+        .then(() => flushInternal({ force: true }))
+        .then(() => onFlush(payload))
+        .catch((err) => {
+          logVerbose(`block-reply-coalescer: media flush error: ${String(err)}`);
+        });
       return;
     }
     if (!hasText) {
@@ -89,14 +120,20 @@ export function createBlockReplyCoalescer(params: {
 
     // When flushOnEnqueue is set (chunkMode="newline"), each enqueued payload is treated
     // as a separate paragraph and flushed immediately so delivery matches streaming boundaries.
+    // We capture the payload at enqueue time and send it directly via the chain,
+    // rather than relying on the buffer (which could be overwritten by subsequent enqueues
+    // before the chain runs).
     if (flushOnEnqueue) {
-      if (bufferText) {
-        void flush({ force: true });
-      }
-      bufferReplyToId = payload.replyToId;
-      bufferAudioAsVoice = payload.audioAsVoice;
-      bufferText = text;
-      void flush({ force: true });
+      const capturedPayload: ReplyPayload = {
+        text,
+        replyToId: payload.replyToId,
+        audioAsVoice: payload.audioAsVoice,
+      };
+      flushChain = flushChain
+        .then(() => onFlush(capturedPayload))
+        .catch((err) => {
+          logVerbose(`block-reply-coalescer: flushOnEnqueue error: ${String(err)}`);
+        });
       return;
     }
 
@@ -104,7 +141,11 @@ export function createBlockReplyCoalescer(params: {
       bufferText &&
       (bufferReplyToId !== payload.replyToId || bufferAudioAsVoice !== payload.audioAsVoice)
     ) {
-      void flush({ force: true });
+      flushChain = flushChain
+        .then(() => flushInternal({ force: true }))
+        .catch((err) => {
+          logVerbose(`block-reply-coalescer: context change flush error: ${String(err)}`);
+        });
     }
 
     if (!bufferText) {
@@ -115,24 +156,32 @@ export function createBlockReplyCoalescer(params: {
     const nextText = bufferText ? `${bufferText}${joiner}${text}` : text;
     if (nextText.length > maxChars) {
       if (bufferText) {
-        void flush({ force: true });
+        flushChain = flushChain
+          .then(() => flushInternal({ force: true }))
+          .catch((err) => {
+            logVerbose(`block-reply-coalescer: overflow flush error: ${String(err)}`);
+          });
         bufferReplyToId = payload.replyToId;
         bufferAudioAsVoice = payload.audioAsVoice;
         if (text.length >= maxChars) {
-          void onFlush(payload);
+          chainedOnFlush(payload);
           return;
         }
         bufferText = text;
         scheduleIdleFlush();
         return;
       }
-      void onFlush(payload);
+      chainedOnFlush(payload);
       return;
     }
 
     bufferText = nextText;
     if (bufferText.length >= maxChars) {
-      void flush({ force: true });
+      flushChain = flushChain
+        .then(() => flushInternal({ force: true }))
+        .catch((err) => {
+          logVerbose(`block-reply-coalescer: max length flush error: ${String(err)}`);
+        });
       return;
     }
     scheduleIdleFlush();

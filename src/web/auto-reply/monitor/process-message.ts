@@ -251,6 +251,8 @@ export async function processMessage(params: {
   });
   let didLogHeartbeatStrip = false;
   let didSendReply = false;
+  let didLogAutoReply = false;
+  let finalReplyCount = 0;
   const commandAuthorized = shouldComputeCommandAuthorized(params.msg.body, params.cfg)
     ? await resolveWhatsAppCommandAuthorized({ cfg: params.cfg, msg: params.msg })
     : undefined;
@@ -372,13 +374,22 @@ export async function processMessage(params: {
           logVerboseMessage: shouldLog,
         });
         if (info.kind === "final") {
-          const fromDisplay =
-            params.msg.chatType === "group" ? conversationId : (params.msg.from ?? "unknown");
-          const hasMedia = Boolean(payload.mediaUrl || payload.mediaUrls?.length);
-          whatsappOutboundLog.info(`Auto-replied to ${fromDisplay}${hasMedia ? " (media)" : ""}`);
+          finalReplyCount += 1;
+          // Only log "Auto-replied" once per message to avoid duplicate log entries
+          // when block streaming sends multiple final payloads
+          if (!didLogAutoReply) {
+            didLogAutoReply = true;
+            const fromDisplay =
+              params.msg.chatType === "group" ? conversationId : (params.msg.from ?? "unknown");
+            const hasMedia = Boolean(payload.mediaUrl || payload.mediaUrls?.length);
+            whatsappOutboundLog.info(`Auto-replied to ${fromDisplay}${hasMedia ? " (media)" : ""}`);
+          }
           if (shouldLogVerbose()) {
             const preview = payload.text != null ? elide(payload.text, 400) : "<media>";
-            whatsappOutboundLog.debug(`Reply body: ${preview}${hasMedia ? " (media)" : ""}`);
+            const hasMedia = Boolean(payload.mediaUrl || payload.mediaUrls?.length);
+            whatsappOutboundLog.debug(
+              `Reply body (final #${finalReplyCount}): ${preview}${hasMedia ? " (media)" : ""}`,
+            );
           }
         }
       },
@@ -391,6 +402,15 @@ export async function processMessage(params: {
               : "auto-reply";
         whatsappOutboundLog.error(
           `Failed sending web ${label} to ${params.msg.from ?? conversationId}: ${formatError(err)}`,
+        );
+      },
+      onSkip: (payload, info) => {
+        // Log when messages are silently dropped to help diagnose delivery issues
+        const fromDisplay =
+          params.msg.chatType === "group" ? conversationId : (params.msg.from ?? "unknown");
+        const preview = payload.text != null ? elide(payload.text, 100) : "<no text>";
+        whatsappOutboundLog.debug(
+          `Skipped ${info.kind} reply to ${fromDisplay}: reason=${info.reason}, text=${preview}`,
         );
       },
       onReplyStart: params.msg.sendComposing,

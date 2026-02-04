@@ -2,8 +2,24 @@ import type { HumanDelayConfig } from "../../config/types.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import type { ResponsePrefixContext } from "./response-prefix-template.js";
 import type { TypingController } from "./typing.js";
+import { logVerbose } from "../../globals.js";
 import { sleep } from "../../utils.js";
 import { normalizeReplyPayload, type NormalizeReplySkipReason } from "./normalize-reply.js";
+
+/** Build a deduplication key for a payload based on content. */
+function buildPayloadDedupeKey(payload: ReplyPayload): string {
+  const text = payload.text?.trim() ?? "";
+  const mediaList = payload.mediaUrls?.length
+    ? payload.mediaUrls
+    : payload.mediaUrl
+      ? [payload.mediaUrl]
+      : [];
+  return JSON.stringify({
+    text,
+    mediaList,
+    replyToId: payload.replyToId ?? null,
+  });
+}
 
 export type ReplyDispatchKind = "tool" | "block" | "final";
 
@@ -108,6 +124,8 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
     block: 0,
     final: 0,
   };
+  // Track sent payloads to deduplicate (keyed by content hash).
+  const sentPayloadKeys = new Set<string>();
 
   const enqueue = (kind: ReplyDispatchKind, payload: ReplyPayload) => {
     const normalized = normalizeReplyPayloadInternal(payload, {
@@ -120,6 +138,20 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
     if (!normalized) {
       return false;
     }
+
+    // Deduplicate payloads with identical content to prevent duplicate sends.
+    // Only deduplicate final replies - tool/block may legitimately repeat.
+    // Use the original payload for deduplication key (before normalization) so that
+    // payloads with different original text aren't incorrectly merged after processing.
+    if (kind === "final") {
+      const dedupeKey = buildPayloadDedupeKey(payload);
+      if (sentPayloadKeys.has(dedupeKey)) {
+        logVerbose(`reply-dispatcher: skipping duplicate final payload`);
+        return false;
+      }
+      sentPayloadKeys.add(dedupeKey);
+    }
+
     queuedCounts[kind] += 1;
     pending += 1;
 

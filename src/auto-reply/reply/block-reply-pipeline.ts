@@ -201,7 +201,14 @@ export function createBlockReplyPipeline(params: {
     }
     const hasMedia = Boolean(payload.mediaUrl) || (payload.mediaUrls?.length ?? 0) > 0;
     if (hasMedia) {
-      void coalescer?.flush({ force: true });
+      // Chain the coalescer flush through sendChain to preserve ordering
+      if (coalescer) {
+        sendChain = sendChain
+          .then(() => coalescer.flush({ force: true }))
+          .catch((err) => {
+            logVerbose(`block-reply-pipeline: coalescer flush error: ${String(err)}`);
+          });
+      }
       sendPayload(payload);
       return;
     }
