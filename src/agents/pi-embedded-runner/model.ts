@@ -1,6 +1,5 @@
 import type { Api, KnownProvider, Model } from "@mariozechner/pi-ai";
 import { getModel, getProviders } from "@mariozechner/pi-ai";
-
 import type { OpenClawConfig } from "../../config/config.js";
 import type { ModelDefinitionConfig } from "../../config/types.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";

@@ -87,7 +87,9 @@ export type ImageStrippingStats = MediaStrippingStats;
 
 /** Check for new format media block (image, audio, or video with inline data) */
 function isNewFormatMediaBlock(block: unknown): block is MediaBlockNew {
-  if (!block || typeof block !== "object") return false;
+  if (!block || typeof block !== "object") {
+    return false;
+  }
   const rec = block as Record<string, unknown>;
   const isMediaType = rec.type === "image" || rec.type === "audio" || rec.type === "video";
   return isMediaType && typeof rec.data === "string" && typeof rec.mimeType === "string";
@@ -95,41 +97,63 @@ function isNewFormatMediaBlock(block: unknown): block is MediaBlockNew {
 
 /** Check for old Anthropic-style image block with base64 source */
 function isOldFormatImageBlock(block: unknown): block is ImageBlockOld {
-  if (!block || typeof block !== "object") return false;
+  if (!block || typeof block !== "object") {
+    return false;
+  }
   const rec = block as Record<string, unknown>;
-  if (rec.type !== "image") return false;
+  if (rec.type !== "image") {
+    return false;
+  }
   const source = rec.source as Record<string, unknown> | undefined;
   return source?.type === "base64" && typeof source?.data === "string";
 }
 
 /** Check for data URL in image_url block */
 function isDataUrlImageBlock(block: unknown): block is ImageBlockUrl {
-  if (!block || typeof block !== "object") return false;
+  if (!block || typeof block !== "object") {
+    return false;
+  }
   const rec = block as Record<string, unknown>;
-  if (rec.type !== "image_url") return false;
+  if (rec.type !== "image_url") {
+    return false;
+  }
   const imageUrl = rec.image_url as Record<string, unknown> | undefined;
-  if (typeof imageUrl?.url !== "string") return false;
+  if (typeof imageUrl?.url !== "string") {
+    return false;
+  }
   // Only match data URLs (base64 embedded), not regular URLs
   return imageUrl.url.startsWith("data:");
 }
 
 /** Check for data URL in audio_url block (defensive) */
 function isDataUrlAudioBlock(block: unknown): block is AudioBlockUrl {
-  if (!block || typeof block !== "object") return false;
+  if (!block || typeof block !== "object") {
+    return false;
+  }
   const rec = block as Record<string, unknown>;
-  if (rec.type !== "audio_url") return false;
+  if (rec.type !== "audio_url") {
+    return false;
+  }
   const audioUrl = rec.audio_url as Record<string, unknown> | undefined;
-  if (typeof audioUrl?.url !== "string") return false;
+  if (typeof audioUrl?.url !== "string") {
+    return false;
+  }
   return audioUrl.url.startsWith("data:");
 }
 
 /** Check for data URL in video_url block (defensive) */
 function isDataUrlVideoBlock(block: unknown): block is VideoBlockUrl {
-  if (!block || typeof block !== "object") return false;
+  if (!block || typeof block !== "object") {
+    return false;
+  }
   const rec = block as Record<string, unknown>;
-  if (rec.type !== "video_url") return false;
+  if (rec.type !== "video_url") {
+    return false;
+  }
   const videoUrl = rec.video_url as Record<string, unknown> | undefined;
-  if (typeof videoUrl?.url !== "string") return false;
+  if (typeof videoUrl?.url !== "string") {
+    return false;
+  }
   return videoUrl.url.startsWith("data:");
 }
 
@@ -157,7 +181,9 @@ export const isBase64ImageBlock = isBase64MediaBlock;
 function parseDataUrl(dataUrl: string): { data: string; mimeType: string } | null {
   // Format: data:[<mediatype>][;base64],<data>
   const match = dataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
   return {
     mimeType: match[1] || "application/octet-stream",
     data: match[2] || "",
@@ -189,7 +215,9 @@ export function getMediaData(block: MediaBlock): { data: string; mimeType: strin
   }
   if (url) {
     const parsed = parseDataUrl(url);
-    if (parsed) return parsed;
+    if (parsed) {
+      return parsed;
+    }
   }
   return { data: "", mimeType: "unknown" };
 }
@@ -202,8 +230,12 @@ export const getImageData = getMediaData;
 // ============================================================================
 
 export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
@@ -218,8 +250,12 @@ export function estimateBase64Bytes(base64Length: number): number {
 
 /** Determine the media kind label for placeholder text */
 function getMediaKindLabel(mimeType: string): string {
-  if (mimeType.startsWith("audio/")) return "Audio";
-  if (mimeType.startsWith("video/")) return "Video";
+  if (mimeType.startsWith("audio/")) {
+    return "Audio";
+  }
+  if (mimeType.startsWith("video/")) {
+    return "Video";
+  }
   return "Image";
 }
 
@@ -235,7 +271,9 @@ export function replaceMediaWithPlaceholders(
   stats?: MediaStrippingStats,
 ): unknown[] {
   return content.map((block) => {
-    if (!isBase64MediaBlock(block)) return block;
+    if (!isBase64MediaBlock(block)) {
+      return block;
+    }
 
     const { data, mimeType } = getMediaData(block);
     const sizeBytes = estimateBase64Bytes(data.length);
@@ -314,7 +352,9 @@ export function logMediaStripping(
   strippedCount: number,
   forceLog = false,
 ): void {
-  if (strippedCount === 0) return;
+  if (strippedCount === 0) {
+    return;
+  }
 
   strippedSinceLastLog += strippedCount;
   const now = Date.now();
