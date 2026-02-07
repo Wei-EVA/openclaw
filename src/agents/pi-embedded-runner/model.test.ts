@@ -128,6 +128,15 @@ describe("resolveModel", () => {
     expect(result.model?.id).toBe("missing-model");
   });
 
+  it("builds an anthropic fallback for claude-opus-4-6", () => {
+    const result = resolveModel("anthropic", "claude-opus-4-6", "/tmp/agent");
+
+    expect(result.error).toBeUndefined();
+    expect(result.model).toBeDefined();
+    expect(result.model?.id).toBe("claude-opus-4-6");
+    expect(result.model?.provider).toBe("anthropic");
+  });
+
   it("builds an openai-codex fallback for gpt-5.3-codex", () => {
     const result = resolveModel("openai-codex", "gpt-5.3-codex", "/tmp/agent");
 

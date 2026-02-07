@@ -20,6 +20,49 @@ type InlineProviderConfig = {
   models?: ModelDefinitionConfig[];
 };
 
+const ANTHROPIC_OPUS_46_MODEL_ID = "claude-opus-4-6";
+const ANTHROPIC_OPUS_TEMPLATE_MODEL_IDS = ["claude-opus-4-5"] as const;
+
+function resolveAnthropicOpus46FallbackModel(
+  provider: string,
+  modelId: string,
+  modelRegistry: ModelRegistry,
+): Model<Api> | undefined {
+  const normalizedProvider = normalizeProviderId(provider);
+  const trimmedModelId = modelId.trim();
+  if (normalizedProvider !== "anthropic") {
+    return undefined;
+  }
+  if (trimmedModelId.toLowerCase() !== ANTHROPIC_OPUS_46_MODEL_ID) {
+    return undefined;
+  }
+
+  for (const templateId of ANTHROPIC_OPUS_TEMPLATE_MODEL_IDS) {
+    const template = modelRegistry.find(normalizedProvider, templateId) as Model<Api> | null;
+    if (!template) {
+      continue;
+    }
+    return normalizeModelCompat({
+      ...template,
+      id: trimmedModelId,
+      name: trimmedModelId,
+    } as Model<Api>);
+  }
+
+  // Hard-coded fallback if no template model is found in registry.
+  return normalizeModelCompat({
+    id: trimmedModelId,
+    name: trimmedModelId,
+    api: "anthropic-messages",
+    provider: normalizedProvider,
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+    contextWindow: DEFAULT_CONTEXT_TOKENS,
+    maxTokens: 128_000,
+  } as Model<Api>);
+}
+
 const OPENAI_CODEX_GPT_53_MODEL_ID = "gpt-5.3-codex";
 
 const OPENAI_CODEX_TEMPLATE_MODEL_IDS = ["gpt-5.2-codex"] as const;
@@ -152,6 +195,15 @@ export function resolveModel(
         authStorage,
         modelRegistry,
       };
+    }
+    // Anthropic opus-4-6 forward-compat fallback (not yet in pi-ai catalog).
+    const anthropicForwardCompat = resolveAnthropicOpus46FallbackModel(
+      provider,
+      modelId,
+      modelRegistry,
+    );
+    if (anthropicForwardCompat) {
+      return { model: anthropicForwardCompat, authStorage, modelRegistry };
     }
     // Codex gpt-5.3 forward-compat fallback must be checked BEFORE the generic providerCfg fallback.
     // Otherwise, if cfg.models.providers["openai-codex"] is configured, the generic fallback fires
