@@ -127,4 +127,13 @@ describe("resolveModel", () => {
     expect(result.model?.provider).toBe("custom");
     expect(result.model?.id).toBe("missing-model");
   });
+
+  it("builds an openai-codex fallback for gpt-5.3-codex", () => {
+    const result = resolveModel("openai-codex", "gpt-5.3-codex", "/tmp/agent");
+
+    expect(result.error).toBeUndefined();
+    expect(result.model).toBeDefined();
+    expect(result.model?.id).toBe("gpt-5.3-codex");
+    expect(result.model?.provider).toBe("openai-codex");
+  });
 });
