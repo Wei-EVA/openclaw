@@ -30,6 +30,16 @@ vi.mock("../pairing/pairing-store.js", () => ({
   readChannelAllowFromStore: (...args: unknown[]) => readAllowFromStoreMock(...args),
   upsertChannelPairingRequest: (...args: unknown[]) => upsertPairingRequestMock(...args),
 }));
+// B12: resolveAgentRoute now calls loadConfig() directly for fresh bindings;
+// stub it so test config bindings are visible during routing.
+let __loadConfigReturn: unknown;
+vi.mock("../config/config.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../config/config.js")>();
+  return {
+    ...actual,
+    loadConfig: () => __loadConfigReturn ?? actual.loadConfig(),
+  };
+});
 vi.mock("../config/sessions.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../config/sessions.js")>();
   return {
@@ -42,6 +52,7 @@ vi.mock("../config/sessions.js", async (importOriginal) => {
 
 beforeEach(() => {
   vi.useRealTimers();
+  __loadConfigReturn = undefined;
   sendMock.mockReset().mockResolvedValue(undefined);
   updateLastRouteMock.mockReset();
   dispatchMock.mockReset().mockImplementation(async ({ dispatcher }) => {
@@ -567,6 +578,8 @@ describe("discord tool result dispatch", () => {
       bindings: [{ agentId: "support", match: { channel: "discord", guildId: "g1" } }],
     } as ReturnType<typeof import("../config/config.js").loadConfig>;
 
+    // B12: resolveAgentRoute now calls loadConfig() directly; expose test cfg
+    __loadConfigReturn = cfg;
     const handler = createDiscordMessageHandler({
       cfg,
       discordConfig: cfg.channels.discord,

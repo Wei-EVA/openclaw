@@ -614,6 +614,7 @@ export function buildRuntimeLine(
     os?: string;
     arch?: string;
     node?: string;
+    shell?: string;
     model?: string;
     defaultModel?: string;
     repoRoot?: string;
@@ -634,6 +635,7 @@ export function buildRuntimeLine(
     runtimeInfo?.node ? `node=${runtimeInfo.node}` : "",
     runtimeInfo?.model ? `model=${runtimeInfo.model}` : "",
     runtimeInfo?.defaultModel ? `default_model=${runtimeInfo.defaultModel}` : "",
+    runtimeInfo?.shell ? `shell=${runtimeInfo.shell}` : "",
     runtimeChannel ? `channel=${runtimeChannel}` : "",
     runtimeChannel
       ? `capabilities=${runtimeCapabilities.length > 0 ? runtimeCapabilities.join(",") : "none"}`

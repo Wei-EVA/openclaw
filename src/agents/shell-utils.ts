@@ -90,6 +90,61 @@ export function sanitizeBinaryOutput(text: string): string {
   return chunks.join("");
 }
 
+/**
+ * Normalize a shell name: extract basename, strip .exe/.cmd/.bat, remove non-alphanum.
+ */
+export function normalizeShellName(value: string): string {
+  let name = path.basename(value);
+  name = name.replace(/\.(exe|cmd|bat)$/i, "");
+  name = name.replace(/[^a-zA-Z0-9_-]/g, "");
+  return name.toLowerCase();
+}
+
+/**
+ * Detect the current runtime shell for the system prompt Runtime line.
+ * Priority: CLAWDBOT_SHELL env > platform defaults > SHELL env > version env heuristics.
+ */
+export function detectRuntimeShell(): string | undefined {
+  // 1. Explicit override
+  const override = process.env.CLAWDBOT_SHELL?.trim();
+  if (override) {
+    return normalizeShellName(override);
+  }
+
+  // 2. Windows: detect PowerShell variant
+  if (process.platform === "win32") {
+    if (process.env.POWERSHELL_DISTRIBUTION_CHANNEL) {
+      return "pwsh";
+    }
+    return "powershell";
+  }
+
+  // 3. Standard Unix SHELL env
+  const envShell = process.env.SHELL?.trim();
+  if (envShell) {
+    return normalizeShellName(envShell);
+  }
+
+  // 4. Fallback heuristics from version-specific env vars
+  if (process.env.BASH_VERSION) {
+    return "bash";
+  }
+  if (process.env.ZSH_VERSION) {
+    return "zsh";
+  }
+  if (process.env.FISH_VERSION) {
+    return "fish";
+  }
+  if (process.env.KSH_VERSION) {
+    return "ksh";
+  }
+  if (process.env.NU_VERSION || process.env.NUSHELL_VERSION) {
+    return "nu";
+  }
+
+  return undefined;
+}
+
 export function killProcessTree(pid: number): void {
   if (process.platform === "win32") {
     try {

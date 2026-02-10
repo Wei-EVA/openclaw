@@ -459,7 +459,8 @@ export function createTelegramBot(opts: TelegramBotOptions) {
       const isGroup = reaction.chat.type === "group" || reaction.chat.type === "supergroup";
       const peerId = isGroup ? buildTelegramGroupPeerId(chatId, resolvedThreadId) : String(chatId);
       const route = resolveAgentRoute({
-        cfg,
+        // Fresh config for bindings lookup; other routing inputs are payload-derived.
+        cfg: loadConfig(),
         channel: "telegram",
         accountId: account.accountId,
         peer: { kind: isGroup ? "group" : "dm", id: peerId },
