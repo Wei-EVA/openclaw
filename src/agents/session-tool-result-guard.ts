@@ -1,8 +1,71 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { TextContent } from "@mariozechner/pi-ai";
 import type { SessionManager } from "@mariozechner/pi-coding-agent";
 import { emitSessionTranscriptUpdate } from "../sessions/transcript-events.js";
+import { HARD_MAX_TOOL_RESULT_CHARS } from "./pi-embedded-runner/tool-result-truncation.js";
 import { logImageStripping, stripImagesFromMessage } from "./session-image-stripper.js";
 import { makeMissingToolResult, sanitizeToolCallInputs } from "./session-transcript-repair.js";
+
+const GUARD_TRUNCATION_SUFFIX =
+  "\n\n--- Tool result truncated during persistence ---\n" +
+  "The output was too large and has been truncated to prevent session corruption.\n" +
+  "Use `offset` and `limit` parameters to read specific sections.";
+
+/**
+ * Pre-emptive hard cap on tool result size before persistence.
+ * Prevents extremely large tool results from ever being stored in full.
+ */
+function capToolResultSize(msg: AgentMessage): AgentMessage {
+  const role = (msg as { role?: string }).role;
+  if (role !== "toolResult") {
+    return msg;
+  }
+  const content = (msg as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return msg;
+  }
+
+  let totalChars = 0;
+  for (const block of content) {
+    if (
+      block &&
+      typeof block === "object" &&
+      (block as { type?: string }).type === "text" &&
+      typeof (block as TextContent).text === "string"
+    ) {
+      totalChars += (block as TextContent).text.length;
+    }
+  }
+
+  if (totalChars <= HARD_MAX_TOOL_RESULT_CHARS) {
+    return msg;
+  }
+
+  // Proportionally distribute the budget across text blocks
+  const newContent = content.map((block: unknown) => {
+    if (
+      !block ||
+      typeof block !== "object" ||
+      (block as { type?: string }).type !== "text" ||
+      typeof (block as TextContent).text !== "string"
+    ) {
+      return block;
+    }
+    const textBlock = block as TextContent;
+    const share = totalChars > 0 ? textBlock.text.length / totalChars : 1;
+    const blockBudget = Math.floor(HARD_MAX_TOOL_RESULT_CHARS * share);
+    if (textBlock.text.length <= blockBudget) {
+      return block;
+    }
+    // Try to cut at a newline boundary (within 80% of budget)
+    const cutRegion = textBlock.text.slice(0, blockBudget);
+    const lastNewline = cutRegion.lastIndexOf("\n");
+    const cutPoint = lastNewline > blockBudget * 0.8 ? lastNewline : blockBudget;
+    return { ...textBlock, text: textBlock.text.slice(0, cutPoint) + GUARD_TRUNCATION_SUFFIX };
+  });
+
+  return { ...msg, content: newContent } as AgentMessage;
+}
 
 type ToolCall = { id: string; name?: string };
 
@@ -133,6 +196,8 @@ export function installSessionToolResultGuard(
     const nextRole = (nextMessage as { role?: unknown }).role;
 
     if (nextRole === "toolResult") {
+      // Pre-emptive hard cap: prevent extremely large tool results from persisting.
+      nextMessage = capToolResultSize(nextMessage);
       const id = extractToolResultId(nextMessage as Extract<AgentMessage, { role: "toolResult" }>);
       const toolName = id ? pending.get(id) : undefined;
       if (id) {

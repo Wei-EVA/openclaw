@@ -1,5 +1,4 @@
-import { CURRENT_SESSION_VERSION } from "@mariozechner/pi-coding-agent";
-import { randomUUID } from "node:crypto";
+import { CURRENT_SESSION_VERSION, SessionManager } from "@mariozechner/pi-coding-agent";
 import fs from "node:fs";
 import path from "node:path";
 import type { MsgContext } from "../../auto-reply/templating.js";
@@ -49,6 +48,8 @@ type TranscriptAppendResult = {
   message?: Record<string, unknown>;
   error?: string;
 };
+
+type AppendMessageArg = Parameters<SessionManager["appendMessage"]>[0];
 
 function resolveTranscriptPath(params: {
   sessionId: string;
@@ -119,29 +120,36 @@ function appendAssistantTranscriptMessage(params: {
   }
 
   const now = Date.now();
-  const messageId = randomUUID().slice(0, 8);
   const labelPrefix = params.label ? `[${params.label}]\n\n` : "";
-  const messageBody: Record<string, unknown> = {
+  const messageBody: AppendMessageArg & Record<string, unknown> = {
     role: "assistant",
     content: [{ type: "text", text: `${labelPrefix}${params.message}` }],
     timestamp: now,
-    stopReason: "injected",
-    usage: { input: 0, output: 0, totalTokens: 0 },
-  };
-  const transcriptEntry = {
-    type: "message",
-    id: messageId,
-    timestamp: new Date(now).toISOString(),
-    message: messageBody,
+    // Use a valid Pi StopReason so downstream tools don't choke on an unknown enum value.
+    stopReason: "stop",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    // Tag as gateway-injected so downstream tooling knows this is not real model output.
+    api: "openai-responses",
+    provider: "openclaw",
+    model: "gateway-injected",
   };
 
   try {
-    fs.appendFileSync(transcriptPath, `${JSON.stringify(transcriptEntry)}\n`, "utf-8");
+    // IMPORTANT: Use SessionManager so the entry is attached to the current leaf via parentId.
+    // Raw jsonl appends break the parent chain and can hide compaction summaries from context.
+    const sessionManager = SessionManager.open(transcriptPath);
+    const messageId = sessionManager.appendMessage(messageBody);
+    return { ok: true, messageId, message: messageBody };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
-
-  return { ok: true, messageId, message: transcriptEntry.message };
 }
 
 function nextChatSeq(context: { agentRunSeq: Map<string, number> }, runId: string) {
@@ -550,7 +558,8 @@ export const chatHandlers: GatewayRequestHandlers = {
                   role: "assistant",
                   content: [{ type: "text", text: combinedReply }],
                   timestamp: now,
-                  stopReason: "injected",
+                  // Use valid Pi StopReason for compat; "injected" is not in the enum.
+                  stopReason: "stop",
                   usage: { input: 0, output: 0, totalTokens: 0 },
                 };
               }
@@ -635,62 +644,35 @@ export const chatHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    // Resolve transcript path
-    const transcriptPath = entry?.sessionFile
-      ? entry.sessionFile
-      : path.join(path.dirname(storePath), `${sessionId}.jsonl`);
+    // Use appendAssistantTranscriptMessage to preserve parentId chain (compaction safety)
+    const appended = appendAssistantTranscriptMessage({
+      message: p.message,
+      label: p.label,
+      sessionId,
+      storePath,
+      sessionFile: entry?.sessionFile,
+    });
 
-    if (!fs.existsSync(transcriptPath)) {
+    if (!appended.ok) {
       respond(
         false,
         undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, "transcript file not found"),
-      );
-      return;
-    }
-
-    // Build transcript entry
-    const now = Date.now();
-    const messageId = randomUUID().slice(0, 8);
-    const labelPrefix = p.label ? `[${p.label}]\n\n` : "";
-    const messageBody: Record<string, unknown> = {
-      role: "assistant",
-      content: [{ type: "text", text: `${labelPrefix}${p.message}` }],
-      timestamp: now,
-      stopReason: "injected",
-      usage: { input: 0, output: 0, totalTokens: 0 },
-    };
-    const transcriptEntry = {
-      type: "message",
-      id: messageId,
-      timestamp: new Date(now).toISOString(),
-      message: messageBody,
-    };
-
-    // Append to transcript file
-    try {
-      fs.appendFileSync(transcriptPath, `${JSON.stringify(transcriptEntry)}\n`, "utf-8");
-    } catch (err) {
-      const errMessage = err instanceof Error ? err.message : String(err);
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.UNAVAILABLE, `failed to write transcript: ${errMessage}`),
+        errorShape(ErrorCodes.UNAVAILABLE, `failed to write transcript: ${appended.error}`),
       );
       return;
     }
 
     // Broadcast to webchat for immediate UI update
     const chatPayload = {
-      runId: `inject-${messageId}`,
+      runId: `inject-${appended.messageId}`,
       sessionKey: p.sessionKey,
       seq: 0,
       state: "final" as const,
-      message: transcriptEntry.message,
+      message: appended.message,
     };
     context.broadcast("chat", chatPayload);
     context.nodeSendToSession(p.sessionKey, "chat", chatPayload);
 
-    respond(true, { ok: true, messageId });
+    respond(true, { ok: true, messageId: appended.messageId });
   },
 };

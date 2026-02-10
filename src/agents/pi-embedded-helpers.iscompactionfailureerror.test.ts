@@ -13,7 +13,7 @@ describe("isCompactionFailureError", () => {
   it("matches compaction overflow failures", () => {
     const samples = [
       'Context overflow: Summarization failed: 400 {"message":"prompt is too long"}',
-      "auto-compaction failed due to context overflow",
+      "Context overflow: auto-compaction failed",
       "Compaction failed: prompt is too long",
     ];
     for (const sample of samples) {
