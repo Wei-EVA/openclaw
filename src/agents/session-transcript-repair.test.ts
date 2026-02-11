@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   sanitizeToolCallInputs,
   sanitizeToolUseResultPairing,
+  stripErroredAssistantTurns,
 } from "./session-transcript-repair.js";
 
 describe("sanitizeToolUseResultPairing", () => {
@@ -111,6 +112,124 @@ describe("sanitizeToolUseResultPairing", () => {
     const out = sanitizeToolUseResultPairing(input);
     expect(out.some((m) => m.role === "toolResult")).toBe(false);
     expect(out.map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+});
+
+describe("stripErroredAssistantTurns", () => {
+  it("strips errored assistant and its tool results", () => {
+    const input: AgentMessage[] = [
+      { role: "user", content: "hello" },
+      {
+        role: "assistant",
+        stopReason: "error",
+        content: [{ type: "toolCall", id: "call_err", name: "read", arguments: {} }],
+      } as AgentMessage,
+      {
+        role: "toolResult",
+        toolCallId: "call_err",
+        toolName: "read",
+        content: [{ type: "text", text: "result" }],
+        isError: false,
+      },
+      { role: "user", content: "retry" },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "ok" }],
+      },
+    ];
+
+    const out = stripErroredAssistantTurns(input);
+    expect(out.map((m) => m.role)).toEqual(["user", "user", "assistant"]);
+  });
+
+  it("strips aborted assistant and its tool results", () => {
+    const input: AgentMessage[] = [
+      {
+        role: "assistant",
+        stopReason: "aborted",
+        content: [{ type: "toolCall", id: "call_ab", name: "exec", arguments: {} }],
+      } as AgentMessage,
+      {
+        role: "toolResult",
+        toolCallId: "call_ab",
+        toolName: "exec",
+        content: [{ type: "text", text: "partial" }],
+        isError: true,
+      },
+      { role: "user", content: "next" },
+    ];
+
+    const out = stripErroredAssistantTurns(input);
+    expect(out.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  it("keeps normal assistant messages untouched", () => {
+    const input: AgentMessage[] = [
+      { role: "user", content: "hi" },
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call_ok", name: "read", arguments: {} }],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call_ok",
+        toolName: "read",
+        content: [{ type: "text", text: "data" }],
+        isError: false,
+      },
+    ];
+
+    const out = stripErroredAssistantTurns(input);
+    expect(out).toBe(input); // same reference = no changes
+  });
+
+  it("strips errored assistant with no tool calls (text only)", () => {
+    const input: AgentMessage[] = [
+      { role: "user", content: "hi" },
+      {
+        role: "assistant",
+        stopReason: "error",
+        content: [{ type: "text", text: "oops" }],
+        errorMessage: "rate limit",
+      } as AgentMessage,
+      { role: "user", content: "retry" },
+    ];
+
+    const out = stripErroredAssistantTurns(input);
+    expect(out.map((m) => m.role)).toEqual(["user", "user"]);
+  });
+
+  it("only strips tool results belonging to the errored assistant", () => {
+    const input: AgentMessage[] = [
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call_good", name: "read", arguments: {} }],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call_good",
+        toolName: "read",
+        content: [{ type: "text", text: "good" }],
+        isError: false,
+      },
+      { role: "user", content: "more" },
+      {
+        role: "assistant",
+        stopReason: "error",
+        content: [{ type: "toolCall", id: "call_bad", name: "exec", arguments: {} }],
+      } as AgentMessage,
+      {
+        role: "toolResult",
+        toolCallId: "call_bad",
+        toolName: "exec",
+        content: [{ type: "text", text: "bad" }],
+        isError: false,
+      },
+    ];
+
+    const out = stripErroredAssistantTurns(input);
+    expect(out.map((m) => m.role)).toEqual(["assistant", "toolResult", "user"]);
+    expect((out[1] as { toolCallId?: string }).toolCallId).toBe("call_good");
   });
 });
 

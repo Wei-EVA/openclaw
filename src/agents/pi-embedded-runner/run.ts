@@ -312,7 +312,8 @@ export async function runEmbeddedPiAgent(
         }
       }
 
-      let overflowCompactionAttempted = false;
+      const MAX_OVERFLOW_COMPACTION_ATTEMPTS = 3;
+      let overflowCompactionAttempts = 0;
       let toolResultTruncationAttempted = false;
       try {
         while (true) {
@@ -384,11 +385,14 @@ export async function runEmbeddedPiAgent(
             if (isContextOverflowError(errorText)) {
               const isCompactionFailure = isCompactionFailureError(errorText);
               // Attempt auto-compaction on context overflow (not compaction_failure)
-              if (!isCompactionFailure && !overflowCompactionAttempted) {
+              if (
+                !isCompactionFailure &&
+                overflowCompactionAttempts < MAX_OVERFLOW_COMPACTION_ATTEMPTS
+              ) {
+                overflowCompactionAttempts++;
                 log.warn(
-                  `context overflow detected; attempting auto-compaction for ${provider}/${modelId}`,
+                  `context overflow detected (attempt ${overflowCompactionAttempts}/${MAX_OVERFLOW_COMPACTION_ATTEMPTS}); attempting auto-compaction for ${provider}/${modelId}`,
                 );
-                overflowCompactionAttempted = true;
                 const compactResult = await compactEmbeddedPiSessionDirect({
                   sessionId: params.sessionId,
                   sessionKey: params.sessionKey,
@@ -441,7 +445,7 @@ export async function runEmbeddedPiAgent(
                     log.info(
                       `tool result truncation succeeded for ${provider}/${modelId}; retrying prompt`,
                     );
-                    overflowCompactionAttempted = false;
+                    overflowCompactionAttempts = 0;
                     continue;
                   }
                   log.warn(`tool result truncation did not help for ${provider}/${modelId}`);

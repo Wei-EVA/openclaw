@@ -273,6 +273,10 @@ export type TelegramForwardedContext = {
   fromUsername?: string;
   fromTitle?: string;
   fromSignature?: string;
+  /** Original chat type from forward_from_chat (e.g. "channel", "supergroup", "group"). */
+  fromChatType?: string;
+  /** Original message ID in the source chat (channel forwards). */
+  fromMessageId?: number;
 };
 
 function normalizeForwardedUserLabel(user: TelegramForwardUser) {
@@ -336,6 +340,7 @@ function buildForwardedContextFromChat(params: {
   date?: number;
   type: string;
   signature?: string;
+  messageId?: number;
 }): TelegramForwardedContext | null {
   const fallbackKind =
     params.type === "channel" || params.type === "legacy_channel" ? "channel" : "chat";
@@ -345,6 +350,7 @@ function buildForwardedContextFromChat(params: {
   }
   const signature = params.signature?.trim() || undefined;
   const from = signature ? `${display} (${signature})` : display;
+  const chatType = params.chat.type ?? undefined;
   return {
     from,
     date: params.date,
@@ -353,6 +359,8 @@ function buildForwardedContextFromChat(params: {
     fromUsername: username,
     fromTitle: title,
     fromSignature: signature,
+    fromChatType: chatType,
+    fromMessageId: params.messageId,
   };
 }
 
@@ -388,6 +396,7 @@ function resolveForwardOrigin(
       date: origin.date,
       type: "channel",
       signature,
+      messageId: origin.message_id,
     });
   }
   return null;
@@ -416,6 +425,7 @@ export function normalizeForwardedContext(msg: TelegramMessage): TelegramForward
       date: forwardMsg.forward_date,
       type: legacyType,
       signature,
+      messageId: forwardMsg.forward_from_message_id,
     });
     if (legacyContext) {
       return legacyContext;

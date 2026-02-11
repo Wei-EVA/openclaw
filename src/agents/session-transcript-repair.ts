@@ -151,6 +151,76 @@ export function sanitizeToolCallInputs(messages: AgentMessage[]): AgentMessage[]
   return repairToolCallInputs(messages).messages;
 }
 
+/**
+ * Strip assistant messages with stopReason "error" or "aborted" and their
+ * associated tool results. The pi-ai SDK's `transformMessages()` also skips
+ * these assistants but does NOT remove the orphaned tool results, causing
+ * Anthropic API rejections ("unexpected tool_use_id found in tool_result
+ * blocks"). By removing them early in the sanitization pipeline we prevent
+ * the SDK from ever seeing the inconsistent pair.
+ */
+export function stripErroredAssistantTurns(messages: AgentMessage[]): AgentMessage[] {
+  // Collect tool call IDs from errored/aborted assistant messages.
+  const erroredToolCallIds = new Set<string>();
+  for (const msg of messages) {
+    if (!msg || typeof msg !== "object" || msg.role !== "assistant") {
+      continue;
+    }
+    const assistant = msg as Extract<AgentMessage, { role: "assistant" }> & {
+      stopReason?: string;
+    };
+    if (assistant.stopReason !== "error" && assistant.stopReason !== "aborted") {
+      continue;
+    }
+    for (const call of extractToolCallsFromAssistant(assistant)) {
+      erroredToolCallIds.add(call.id);
+    }
+  }
+
+  if (erroredToolCallIds.size === 0) {
+    // Fast path: check if there are any errored/aborted assistants without
+    // tool calls (e.g. text-only error turns). If none, return early.
+    const hasErroredAssistant = messages.some((msg) => {
+      if (!msg || typeof msg !== "object" || msg.role !== "assistant") {
+        return false;
+      }
+      const sr = (msg as { stopReason?: unknown }).stopReason;
+      return sr === "error" || sr === "aborted";
+    });
+    if (!hasErroredAssistant) {
+      return messages;
+    }
+  }
+
+  const out: AgentMessage[] = [];
+  for (const msg of messages) {
+    if (!msg || typeof msg !== "object") {
+      out.push(msg);
+      continue;
+    }
+
+    // Drop errored/aborted assistant messages.
+    if (msg.role === "assistant") {
+      const sr = (msg as { stopReason?: unknown }).stopReason;
+      if (sr === "error" || sr === "aborted") {
+        continue;
+      }
+    }
+
+    // Drop tool results whose tool call was in an errored/aborted assistant.
+    if (msg.role === "toolResult") {
+      const id = extractToolResultId(msg);
+      if (id && erroredToolCallIds.has(id)) {
+        continue;
+      }
+    }
+
+    out.push(msg);
+  }
+
+  return out;
+}
+
 export function sanitizeToolUseResultPairing(messages: AgentMessage[]): AgentMessage[] {
   return repairToolUseResultPairing(messages).messages;
 }
@@ -213,6 +283,19 @@ export function repairToolUseResultPairing(messages: AgentMessage[]): ToolUseRep
     }
 
     const assistant = msg as Extract<AgentMessage, { role: "assistant" }>;
+
+    // Skip tool call extraction for aborted or errored assistant messages.
+    // When stopReason is "error" or "aborted", the tool_use blocks may be incomplete
+    // (e.g., partialJson: true) and should not have synthetic tool_results created.
+    // Creating synthetic results for incomplete tool calls causes API 400 errors:
+    // "unexpected tool_use_id found in tool_result blocks"
+    // See: https://github.com/openclaw/openclaw/issues/4597
+    const stopReason = (assistant as { stopReason?: string }).stopReason;
+    if (stopReason === "error" || stopReason === "aborted") {
+      out.push(msg);
+      continue;
+    }
+
     const toolCalls = extractToolCallsFromAssistant(assistant);
     if (toolCalls.length === 0) {
       out.push(msg);

@@ -33,6 +33,8 @@ export type TelegramForwardOrigin = {
   sender_chat?: TelegramForwardChat;
   chat?: TelegramForwardChat;
   date?: number;
+  /** Original message ID in the source chat (channel forwards). */
+  message_id?: number;
 };
 
 export type TelegramForwardMetadata = {
@@ -42,6 +44,8 @@ export type TelegramForwardMetadata = {
   forward_sender_name?: string;
   forward_signature?: string;
   forward_date?: number;
+  /** Original message ID in the source chat (legacy channel forwards). */
+  forward_from_message_id?: number;
 };
 
 export type TelegramForwardedMessage = TelegramMessage & TelegramForwardMetadata;
