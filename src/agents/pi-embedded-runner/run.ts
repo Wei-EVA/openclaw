@@ -119,6 +119,14 @@ export async function runEmbeddedPiAgent(
         throw new Error(error ?? `Unknown model: ${provider}/${modelId}`);
       }
 
+      // Defense-in-depth: some provider converters assume `model.input` is an
+      // array and call `.includes("image")` without a null guard.
+      // If a model registry entry is missing input capabilities, default to text-only
+      // so message conversion never crashes the run loop.
+      if (!Array.isArray(model.input) || model.input.length === 0) {
+        model.input = ["text"];
+      }
+
       const ctxInfo = resolveContextWindowInfo({
         cfg: params.config,
         provider,

@@ -53,6 +53,27 @@ Verify:
 openclaw models status
 ```
 
+### `Cannot read properties of undefined (reading 'includes')` after model ID change
+
+If this starts right after switching model IDs (or using a forward-compat alias),
+the resolved model metadata may be missing `input` capabilities. Some provider
+converters call `model.input.includes("image")`, which crashes when `input` is undefined.
+
+**How to confirm quickly:**
+
+- Check gateway logs for the exact error:
+  - `Cannot read properties of undefined (reading 'includes')`
+- See if it appears on normal agent turns after a model change.
+
+**Fix:**
+
+- Update to a build that guards missing model input capabilities in the embedded run loop.
+- Restart the gateway after updating.
+
+**Why restart matters:**
+
+- Running gateway processes keep old code in memory. File changes only apply after restart.
+
 ### OAuth token refresh failed (Anthropic Claude subscription)
 
 This means the stored Anthropic OAuth token expired and the refresh failed.
