@@ -1,8 +1,12 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import { Type } from "@sinclair/typebox";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { AnyAgentTool } from "./common.js";
 import { fetchWithSsrFGuard } from "../../infra/net/fetch-guard.js";
 import { SsrFBlockedError } from "../../infra/net/ssrf.js";
+import { logInfo } from "../../logger.js";
 import { wrapExternalContent, wrapWebContent } from "../../security/external-content.js";
 import { stringEnum } from "../schema/typebox.js";
 import { jsonResult, readNumberParam, readStringParam } from "./common.js";
@@ -272,6 +276,22 @@ function normalizeContentType(value: string | null | undefined): string | undefi
   return trimmed || undefined;
 }
 
+function isMarkdownContentType(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return normalized.includes("text/markdown") || normalized.includes("text/x-markdown");
+}
+
+function parseMarkdownTokens(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return Math.floor(parsed);
+}
+
 export async function fetchFirecrawlContent(params: {
   url: string;
   extractMode: ExtractMode;
@@ -396,7 +416,7 @@ async function runWebFetch(params: {
       timeoutMs: params.timeoutSeconds * 1000,
       init: {
         headers: {
-          Accept: "*/*",
+          Accept: "text/markdown, text/html, */*;q=0.1",
           "User-Agent": params.userAgent,
           "Accept-Language": "en-US,en;q=0.9",
         },
@@ -494,12 +514,22 @@ async function runWebFetch(params: {
 
     const contentType = res.headers.get("content-type") ?? "application/octet-stream";
     const normalizedContentType = normalizeContentType(contentType) ?? "application/octet-stream";
+    const markdownTokensRaw = res.headers.get("x-markdown-tokens");
+    const markdownTokens = parseMarkdownTokens(markdownTokensRaw);
+    if (markdownTokensRaw) {
+      logInfo(
+        `web-fetch: markdown response tokens url=${finalUrl} header="${markdownTokensRaw}" parsed=${markdownTokens ?? "invalid"}`,
+      );
+    }
     const body = await readResponseText(res);
 
     let title: string | undefined;
     let extractor = "raw";
     let text = body;
-    if (contentType.includes("text/html")) {
+    if (isMarkdownContentType(contentType)) {
+      text = params.extractMode === "text" ? markdownToText(body) : body;
+      extractor = "markdown";
+    } else if (contentType.includes("text/html")) {
       if (params.readabilityEnabled) {
         const readable = await extractReadableContent({
           html: body,
@@ -553,6 +583,7 @@ async function runWebFetch(params: {
       wrappedLength: wrapped.wrappedLength,
       fetchedAt: new Date().toISOString(),
       tookMs: Date.now() - start,
+      markdownTokens,
       text: wrapped.text,
     };
     writeCache(FETCH_CACHE, cacheKey, payload, params.cacheTtlMs);

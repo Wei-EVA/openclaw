@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { ImageContent } from "@mariozechner/pi-ai";
 import type { ReasoningLevel, ThinkLevel, VerboseLevel } from "../../../auto-reply/thinking.js";
 import type { AgentStreamParams } from "../../../commands/agent/types.js";
@@ -71,6 +74,9 @@ export type RunEmbeddedPiAgentParams = {
   timeoutMs: number;
   runId: string;
   abortSignal?: AbortSignal;
+  /** When set, the session-lane task is registered as preemptable so higher-priority
+   *  work (e.g. user messages) can abort it via this controller. Used for heartbeats. */
+  preemptable?: AbortController;
   shouldEmitToolResult?: () => boolean;
   shouldEmitToolOutput?: () => boolean;
   onPartialReply?: (payload: { text?: string; mediaUrls?: string[] }) => void | Promise<void>;

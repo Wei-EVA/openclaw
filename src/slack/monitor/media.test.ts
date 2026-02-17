@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as ssrf from "../../infra/net/ssrf.js";
 
@@ -172,6 +175,30 @@ describe("resolveSlackMedia", () => {
   beforeEach(() => {
     mockFetch = vi.fn();
     globalThis.fetch = mockFetch as typeof fetch;
+    vi.doMock("../../infra/net/fetch-guard.js", async () => {
+      const actual = await vi.importActual<typeof import("../../infra/net/fetch-guard.js")>(
+        "../../infra/net/fetch-guard.js",
+      );
+      return {
+        ...actual,
+        fetchWithSsrFGuard: async (params: {
+          url: string;
+          fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+          init?: RequestInit;
+        }) => {
+          const fetcher = params.fetchImpl ?? globalThis.fetch;
+          if (!fetcher) {
+            throw new Error("fetch is not available");
+          }
+          const response = await fetcher(params.url, params.init);
+          return {
+            response,
+            finalUrl: params.url,
+            release: async () => {},
+          };
+        },
+      };
+    });
     vi.spyOn(ssrf, "resolvePinnedHostname").mockImplementation(async (hostname) => {
       const normalized = hostname.trim().toLowerCase().replace(/\.$/, "");
       const addresses = ["93.184.216.34"];
@@ -186,6 +213,7 @@ describe("resolveSlackMedia", () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.resetModules();
+    vi.doUnmock("../../infra/net/fetch-guard.js");
     vi.restoreAllMocks();
   });
 

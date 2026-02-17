@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import type { SessionManager } from "@mariozechner/pi-coding-agent";
 import type { TSchema } from "@sinclair/typebox";
@@ -116,6 +119,138 @@ function sanitizeAntigravityThinkingBlocks(messages: AgentMessage[]): AgentMessa
     }
     out.push(contentChanged ? { ...assistant, content: nextContent } : msg);
   }
+  return touched ? out : messages;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function estimateAssistantMessageTokens(message: AgentMessage): number {
+  if (message.role !== "assistant" || !Array.isArray(message.content)) {
+    return 0;
+  }
+  let chars = 0;
+  for (const block of message.content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const record = block as Record<string, unknown>;
+    if (record.type === "text" && typeof record.text === "string") {
+      chars += record.text.length;
+      continue;
+    }
+    if (record.type === "thinking" && typeof record.thinking === "string") {
+      chars += record.thinking.length;
+      continue;
+    }
+    if (record.type === "toolCall") {
+      if (typeof record.name === "string") {
+        chars += record.name.length;
+      }
+      if ("arguments" in record) {
+        try {
+          chars += JSON.stringify(record.arguments).length;
+        } catch {
+          // Ignore unserializable arguments and continue.
+        }
+      }
+    }
+  }
+  return chars > 0 ? Math.max(1, Math.ceil(chars / 4)) : 0;
+}
+
+function normalizeAssistantUsage(messages: AgentMessage[], sessionId: string): AgentMessage[] {
+  let touched = false;
+  let repairedCount = 0;
+  let lastKnownTotalTokens = 0;
+  const out: AgentMessage[] = [];
+
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      out.push(message);
+      continue;
+    }
+
+    const assistant = message as AgentMessage & {
+      usage?: unknown;
+      stopReason?: unknown;
+    };
+    const usageRecord =
+      assistant.usage && typeof assistant.usage === "object"
+        ? (assistant.usage as Record<string, unknown>)
+        : undefined;
+    const usageInput = asFiniteNumber(usageRecord?.input) ?? 0;
+    const usageOutput = asFiniteNumber(usageRecord?.output) ?? 0;
+    const usageCacheRead = asFiniteNumber(usageRecord?.cacheRead) ?? 0;
+    const usageCacheWrite = asFiniteNumber(usageRecord?.cacheWrite) ?? 0;
+    const usageTotalTokens = asFiniteNumber(usageRecord?.totalTokens);
+    const usageCostRecord =
+      usageRecord?.cost && typeof usageRecord.cost === "object"
+        ? (usageRecord.cost as Record<string, unknown>)
+        : undefined;
+    const usageCostInput = asFiniteNumber(usageCostRecord?.input) ?? 0;
+    const usageCostOutput = asFiniteNumber(usageCostRecord?.output) ?? 0;
+    const usageCostCacheRead = asFiniteNumber(usageCostRecord?.cacheRead) ?? 0;
+    const usageCostCacheWrite = asFiniteNumber(usageCostRecord?.cacheWrite) ?? 0;
+    const usageCostTotal = asFiniteNumber(usageCostRecord?.total) ?? 0;
+
+    const hasCompleteUsage =
+      usageRecord &&
+      asFiniteNumber(usageRecord.input) !== undefined &&
+      asFiniteNumber(usageRecord.output) !== undefined &&
+      asFiniteNumber(usageRecord.cacheRead) !== undefined &&
+      asFiniteNumber(usageRecord.cacheWrite) !== undefined &&
+      asFiniteNumber(usageRecord.totalTokens) !== undefined;
+    const hasStopReason =
+      typeof assistant.stopReason === "string" && assistant.stopReason.trim().length > 0;
+
+    if (hasCompleteUsage && hasStopReason) {
+      lastKnownTotalTokens = usageTotalTokens ?? lastKnownTotalTokens;
+      out.push(message);
+      continue;
+    }
+
+    touched = true;
+    repairedCount += 1;
+
+    const estimatedTokens = estimateAssistantMessageTokens(message);
+    const synthesizedOutput = usageOutput > 0 ? usageOutput : estimatedTokens;
+    const synthesizedTotal =
+      usageTotalTokens ??
+      (usageInput + usageOutput + usageCacheRead + usageCacheWrite > 0
+        ? usageInput + usageOutput + usageCacheRead + usageCacheWrite
+        : Math.max(lastKnownTotalTokens + estimatedTokens, estimatedTokens));
+    const normalizedUsage = {
+      input: usageInput,
+      output: synthesizedOutput,
+      cacheRead: usageCacheRead,
+      cacheWrite: usageCacheWrite,
+      totalTokens: synthesizedTotal,
+      cost: {
+        input: usageCostInput,
+        output: usageCostOutput,
+        cacheRead: usageCostCacheRead,
+        cacheWrite: usageCostCacheWrite,
+        total: usageCostTotal,
+      },
+    };
+    const normalizedStopReason = hasStopReason ? assistant.stopReason : "stop";
+
+    out.push({
+      ...assistant,
+      usage: normalizedUsage,
+      stopReason: normalizedStopReason,
+    } as AgentMessage);
+    lastKnownTotalTokens = normalizedUsage.totalTokens;
+  }
+
+  if (touched) {
+    log.warn(
+      `session history repair: normalized ${repairedCount} assistant message(s) with missing usage/stopReason (sessionId=${sessionId})`,
+    );
+  }
+
   return touched ? out : messages;
 }
 
@@ -353,6 +488,7 @@ export async function sanitizeSessionHistory(params: {
   const repairedTools = policy.repairToolUseResultPairing
     ? sanitizeToolUseResultPairing(sanitizedToolCalls)
     : sanitizedToolCalls;
+  const normalizedAssistantUsage = normalizeAssistantUsage(repairedTools, params.sessionId);
 
   const isOpenAIResponsesApi =
     params.modelApi === "openai-responses" || params.modelApi === "openai-codex-responses";
@@ -368,8 +504,8 @@ export async function sanitizeSessionHistory(params: {
     : false;
   const sanitizedOpenAI =
     isOpenAIResponsesApi && modelChanged
-      ? downgradeOpenAIReasoningBlocks(repairedTools)
-      : repairedTools;
+      ? downgradeOpenAIReasoningBlocks(normalizedAssistantUsage)
+      : normalizedAssistantUsage;
 
   if (hasSnapshot && (!priorSnapshot || modelChanged)) {
     appendModelSnapshot(params.sessionManager, {

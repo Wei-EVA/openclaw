@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import crypto from "node:crypto";
 import fs from "node:fs";
 import type { TemplateContext } from "../templating.js";
@@ -307,6 +310,7 @@ export async function runAgentTurnWithFallback(params: {
             runId,
             images: params.opts?.images,
             abortSignal: params.opts?.abortSignal,
+            preemptable: params.opts?.preemptable,
             blockReplyBreak: params.resolvedBlockStreamingBreak,
             blockReplyChunking: params.blockReplyChunking,
             onPartialReply: allowPartialStream

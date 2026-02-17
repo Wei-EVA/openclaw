@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { Api, KnownProvider, Model } from "@mariozechner/pi-ai";
 import { getModel, getProviders } from "@mariozechner/pi-ai";
 import type { OpenClawConfig } from "../../config/config.js";

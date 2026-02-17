@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import { diagnosticLogger as diag, logLaneDequeue, logLaneEnqueue } from "../logging/diagnostic.js";
 import { CommandLane } from "./lanes.js";
 
@@ -21,6 +24,8 @@ type LaneState = {
   active: number;
   maxConcurrent: number;
   draining: boolean;
+  /** AbortController for the currently running preemptable task (e.g. heartbeat). */
+  preemptableAbort?: AbortController;
 };
 
 const lanes = new Map<string, LaneState>();
@@ -102,14 +107,38 @@ export function enqueueCommandInLane<T>(
   opts?: {
     warnAfterMs?: number;
     onWait?: (waitMs: number, queuedAhead: number) => void;
+    /** Mark this task as preemptable (e.g. heartbeat). When a non-preemptable
+     *  task enqueues on the same lane, the controller is aborted so the
+     *  low-priority task can yield quickly. */
+    preemptable?: AbortController;
   },
 ): Promise<T> {
   const cleaned = lane.trim() || CommandLane.Main;
   const warnAfterMs = opts?.warnAfterMs ?? 2_000;
   const state = getLaneState(cleaned);
+
+  // If a non-preemptable task enqueues while a preemptable task is running,
+  // signal the preemptable task to abort so user work is unblocked sooner.
+  if (!opts?.preemptable && state.preemptableAbort) {
+    diag.info(`lane preempt: lane=${cleaned} — aborting preemptable task for higher-priority work`);
+    state.preemptableAbort.abort();
+    state.preemptableAbort = undefined;
+  }
+
   return new Promise<T>((resolve, reject) => {
     state.queue.push({
-      task: () => task(),
+      task: () => {
+        // Register preemptable controller when the task starts executing.
+        if (opts?.preemptable) {
+          state.preemptableAbort = opts.preemptable;
+        }
+        return task().finally(() => {
+          // Clear preemptable marker when the task finishes.
+          if (opts?.preemptable && state.preemptableAbort === opts.preemptable) {
+            state.preemptableAbort = undefined;
+          }
+        });
+      },
       resolve: (value) => resolve(value as T),
       reject,
       enqueuedAt: Date.now(),

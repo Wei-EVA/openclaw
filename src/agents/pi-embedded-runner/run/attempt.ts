@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { ImageContent } from "@mariozechner/pi-ai";
 import { streamSimple } from "@mariozechner/pi-ai";
@@ -470,6 +473,12 @@ export async function runEmbeddedAttempt(
         : [];
 
       const allCustomTools = [...customTools, ...clientToolDefs];
+
+      // Defense-in-depth: ensure model.input is always an array before handing
+      // to pi-coding-agent / pi-ai, which may access it without a null guard.
+      if (params.model && !params.model.input) {
+        params.model.input = ["text"];
+      }
 
       ({ session } = await createAgentSession({
         cwd: resolvedWorkspace,

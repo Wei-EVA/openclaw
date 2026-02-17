@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseAudioTag } from "./audio-tags.js";
 import { createBlockReplyCoalescer } from "./block-reply-coalescer.js";

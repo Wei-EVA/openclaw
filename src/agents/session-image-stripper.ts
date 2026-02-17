@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE for details.
+
 /**
  * Session media stripper - removes base64 media (images, audio, video) from messages before persistence.
  *

@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 export type ThinkLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type VerboseLevel = "off" | "on" | "full";
 export type NoticeLevel = "off" | "on" | "full";

@@ -1,8 +1,14 @@
+<!-- Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved. -->
+<!-- Original work copyright OpenClaw contributors, licensed under AGPL-3.0. -->
+
 ---
+
 summary: "Quick troubleshooting guide for common OpenClaw failures"
 read_when:
-  - Investigating runtime issues or failures
-title: "Troubleshooting"
+
+- Investigating runtime issues or failures
+  title: "Troubleshooting"
+
 ---
 
 # Troubleshooting 🔧

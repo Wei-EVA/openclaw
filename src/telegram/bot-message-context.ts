@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { Bot } from "grammy";
 import type { DmPolicy, TelegramGroupConfig, TelegramTopicConfig } from "../config/types.js";
 import type { TelegramContext } from "./bot/types.js";
@@ -26,7 +29,7 @@ import { resolveMentionGatingWithBypass } from "../channels/mention-gating.js";
 import { recordInboundSession } from "../channels/session.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { loadConfig, type OpenClawConfig } from "../config/config.js";
-import { readSessionUpdatedAt, resolveStorePath } from "../config/sessions.js";
+import { loadSessionStore, readSessionUpdatedAt, resolveStorePath } from "../config/sessions.js";
 import { logVerbose, shouldLogVerbose } from "../globals.js";
 import { recordChannelActivity } from "../infra/channel-activity.js";
 import { upsertChannelPairingRequest } from "../pairing/pairing-store.js";
@@ -177,7 +180,19 @@ export const buildTelegramMessageContext = async ({
       id: peerId,
     },
   });
-  const baseSessionKey = route.sessionKey;
+  // When dmScope != "main", the per-peer session key may differ from the main session.
+  // If the main session is actively delivering to this same peer (A2A round-trip),
+  // route the inbound message there instead so the conversation stays unified.
+  let baseSessionKey = route.sessionKey;
+  if (!isGroup && baseSessionKey !== route.mainSessionKey) {
+    const earlyStorePath = resolveStorePath(cfg.session?.store, { agentId: route.agentId });
+    const store = loadSessionStore(earlyStorePath);
+    const mainEntry = store[route.mainSessionKey];
+    const dc = mainEntry?.deliveryContext;
+    if (dc?.channel === "telegram" && dc?.to === String(chatId)) {
+      baseSessionKey = route.mainSessionKey;
+    }
+  }
   // DMs: use raw messageThreadId for thread sessions (not forum topic ids)
   const dmThreadId = threadSpec.scope === "dm" ? threadSpec.id : undefined;
   const threadKeys =

@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE for details.
+
 import { anthropicOAuthProvider } from "@mariozechner/pi-ai";
 import { exec } from "child_process";
 import * as readline from "readline";
@@ -17,7 +20,7 @@ async function login() {
       console.log("Opening browser...");
       exec(`open '${url}'`);
     },
-    onPrompt: async (prompt) => {
+    onPrompt: async (_prompt) => {
       return new Promise((resolve) => {
         rl.question("Paste authorization code: ", (answer) => {
           resolve(answer.trim());

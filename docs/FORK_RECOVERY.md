@@ -1,3 +1,6 @@
+<!-- Copyright (c) 2024-2026 Tianwei Zhou. All rights reserved. -->
+<!-- Licensed under AGPL-3.0. See LICENSE for details. -->
+
 # Fork 恢复指南
 
 本文档说明如何从你的 GitHub fork 恢复本地定制化的 OpenClaw 安装。

@@ -1,10 +1,16 @@
+<!-- Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved. -->
+<!-- Original work copyright OpenClaw contributors, licensed under AGPL-3.0. -->
+
 ---
+
 summary: "Testing kit: unit/e2e/live suites, Docker runners, and what each test covers"
 read_when:
-  - Running tests locally or in CI
-  - Adding regressions for model/provider bugs
-  - Debugging gateway + agent behavior
-title: "Testing"
+
+- Running tests locally or in CI
+- Adding regressions for model/provider bugs
+- Debugging gateway + agent behavior
+  title: "Testing"
+
 ---
 
 # Testing
@@ -34,6 +40,35 @@ When debugging real providers/models (requires real creds):
 - Live suite (models + gateway tool/image probes): `pnpm test:live`
 
 Tip: when you only need one failing case, prefer narrowing live tests via the allowlist env vars described below.
+
+## Local fork stability strategy
+
+Use this workflow to keep a local fork healthy while avoiding risky broad fixes:
+
+1. Run the fast gate first: `pnpm build && pnpm check`.
+2. Run focused tests for changed areas before full suite runs.
+3. Classify failures before changing code:
+   - Environment limited failures: `listen EPERM`, `EMFILE`, sandbox network restrictions, port bind restrictions.
+   - Product regressions: deterministic assertion failures in unit logic.
+4. Fix in this order:
+   - Format or lint drift.
+   - Isolated test drift (prefer test-only fixes for environment coupling).
+   - Runtime behavior fixes (smallest scope first).
+5. Re-verify with targeted test files, then rerun `pnpm check`.
+6. Run full `pnpm test` only in an environment that allows local listeners and expected file watcher limits.
+
+### Environment constrained test handling
+
+When running inside restricted environments, treat these as infra signals, not immediate product bugs:
+
+- `listen EPERM: operation not permitted` on `127.0.0.1` or `0.0.0.0`
+- `EMFILE: too many open files, watch`
+
+Recommended approach:
+
+- Keep runtime code unchanged unless the failure reproduces outside restricted environments.
+- Prefer test isolation (mock network and fetch guard layers) over production behavior changes.
+- Record constrained suites separately from product regressions in your run notes.
 
 ## Test suites (what runs where)
 

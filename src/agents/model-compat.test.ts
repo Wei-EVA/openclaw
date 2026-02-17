@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { Api, Model } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
 import { normalizeModelCompat } from "./model-compat.js";
@@ -40,5 +43,19 @@ describe("normalizeModelCompat", () => {
     model.compat = { supportsDeveloperRole: false };
     const normalized = normalizeModelCompat(model);
     expect(normalized.compat?.supportsDeveloperRole).toBe(false);
+  });
+
+  it("defaults missing input to ['text']", () => {
+    const model = baseModel();
+    delete (model as { input?: unknown }).input;
+    const normalized = normalizeModelCompat(model);
+    expect(normalized.input).toEqual(["text"]);
+  });
+
+  it("preserves existing input array", () => {
+    const model = baseModel();
+    model.input = ["text", "image"];
+    const normalized = normalizeModelCompat(model);
+    expect(normalized.input).toEqual(["text", "image"]);
   });
 });

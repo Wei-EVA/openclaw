@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import {
   createAgentSession,
   estimateTokens,
@@ -395,6 +398,12 @@ export async function compactEmbeddedPiSessionDirect(
         tools,
         sandboxEnabled: !!sandbox?.enabled,
       });
+
+      // Defense-in-depth: ensure model.input is always an array before handing
+      // to pi-coding-agent / pi-ai, which may access it without a null guard.
+      if (model && !model.input) {
+        model.input = ["text"];
+      }
 
       const { session } = await createAgentSession({
         cwd: resolvedWorkspace,

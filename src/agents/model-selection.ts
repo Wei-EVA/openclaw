@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { OpenClawConfig } from "../config/config.js";
 import type { ModelCatalogEntry } from "./model-catalog.js";
 import { resolveAgentModelPrimary } from "./agent-scope.js";

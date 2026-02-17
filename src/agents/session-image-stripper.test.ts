@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE for details.
+
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { describe, expect, it, beforeEach } from "vitest";
 import {

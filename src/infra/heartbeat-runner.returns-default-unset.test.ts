@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -444,7 +447,7 @@ describe("runHeartbeatOnce", () => {
       expect(sendWhatsApp).toHaveBeenCalledWith("+1555", "Final alert", expect.any(Object));
       expect(replySpy).toHaveBeenCalledWith(
         expect.objectContaining({ Body: "Ops check", SessionKey: sessionKey }),
-        { isHeartbeat: true },
+        expect.objectContaining({ isHeartbeat: true }),
         cfg,
       );
     } finally {
@@ -527,7 +530,7 @@ describe("runHeartbeatOnce", () => {
       expect(sendWhatsApp).toHaveBeenCalledWith(groupId, "Group alert", expect.any(Object));
       expect(replySpy).toHaveBeenCalledWith(
         expect.objectContaining({ SessionKey: groupSessionKey }),
-        { isHeartbeat: true },
+        expect.objectContaining({ isHeartbeat: true }),
         cfg,
       );
     } finally {
@@ -935,6 +938,72 @@ describe("runHeartbeatOnce", () => {
       expect(res.status).toBe("ran");
       expect(replySpy).toHaveBeenCalled();
       expect(sendWhatsApp).toHaveBeenCalledTimes(1);
+    } finally {
+      replySpy.mockRestore();
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when session lane is busy (user messages queued)", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hb-"));
+    const storePath = path.join(tmpDir, "sessions.json");
+    const replySpy = vi.spyOn(replyModule, "getReplyFromConfig");
+    try {
+      const cfg: OpenClawConfig = {
+        agents: {
+          defaults: {
+            workspace: tmpDir,
+            heartbeat: { every: "5m", target: "whatsapp" },
+          },
+        },
+        channels: { whatsapp: { allowFrom: ["*"] } },
+        session: { store: storePath },
+      };
+      const sessionKey = resolveMainSessionKey(cfg);
+
+      await fs.writeFile(
+        storePath,
+        JSON.stringify(
+          {
+            [sessionKey]: {
+              sessionId: "sid",
+              updatedAt: Date.now(),
+              lastChannel: "whatsapp",
+              lastTo: "+1555",
+            },
+          },
+          null,
+          2,
+        ),
+      );
+
+      const sendWhatsApp = vi.fn().mockResolvedValue({ messageId: "m1", toJid: "jid" });
+
+      // Simulate: Main lane empty but session lane has a queued user message.
+      const getQueueSize = (lane?: string) => {
+        if (lane && lane.startsWith("session:")) {
+          return 1;
+        }
+        return 0;
+      };
+
+      const res = await runHeartbeatOnce({
+        cfg,
+        deps: {
+          sendWhatsApp,
+          getQueueSize,
+          nowMs: () => 0,
+          webAuthExists: async () => true,
+          hasActiveWebListener: () => true,
+        },
+      });
+
+      expect(res.status).toBe("skipped");
+      if (res.status === "skipped") {
+        expect(res.reason).toBe("session-busy");
+      }
+      expect(replySpy).not.toHaveBeenCalled();
+      expect(sendWhatsApp).not.toHaveBeenCalled();
     } finally {
       replySpy.mockRestore();
       await fs.rm(tmpDir, { recursive: true, force: true });

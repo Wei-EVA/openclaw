@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { OpenClawConfig } from "../config/config.js";
 import type { GatewayMessageChannel } from "../utils/message-channel.js";
 import type { AnyAgentTool } from "./tools/common.js";
@@ -96,6 +99,9 @@ export function createOpenClawTools(options?: {
     }),
     createTtsTool({
       agentChannel: options?.agentChannel,
+      agentSessionKey: options?.agentSessionKey,
+      agentTo: options?.agentTo,
+      agentAccountId: options?.agentAccountId,
       config: options?.config,
     }),
     createGatewayTool({

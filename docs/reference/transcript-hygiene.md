@@ -1,10 +1,16 @@
+<!-- Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved. -->
+<!-- Original work copyright OpenClaw contributors, licensed under AGPL-3.0. -->
+
 ---
+
 summary: "Reference: provider-specific transcript sanitization and repair rules"
 read_when:
-  - You are debugging provider request rejections tied to transcript shape
-  - You are changing transcript sanitization or tool-call repair logic
-  - You are investigating tool-call id mismatches across providers
-title: "Transcript Hygiene"
+
+- You are debugging provider request rejections tied to transcript shape
+- You are changing transcript sanitization or tool-call repair logic
+- You are investigating tool-call id mismatches across providers
+  title: "Transcript Hygiene"
+
 ---
 
 # Transcript Hygiene (Provider Fixups)
@@ -21,6 +27,7 @@ Scope includes:
 - Tool call id sanitization
 - Tool call input validation
 - Tool result pairing repair
+- Assistant usage normalization
 - Turn validation / ordering
 - Thought signature cleanup
 - Image payload sanitization
@@ -69,6 +76,30 @@ Implementation:
 
 - `sanitizeToolCallInputs` in `src/agents/session-transcript-repair.ts`
 - Applied in `sanitizeSessionHistory` in `src/agents/pi-embedded-runner/google.ts`
+
+---
+
+## Global rule: malformed assistant usage metadata
+
+Assistant messages missing `usage` or `stopReason` are normalized in-memory before model
+context is built. This prevents compaction/token-accounting crashes when old transcripts
+contain hand-written or partially persisted assistant turns.
+
+Normalization behavior:
+
+- Missing/invalid `usage` fields are synthesized to numeric defaults.
+- If a prior assistant usage exists, synthesized `totalTokens` is anchored to that value plus
+  a lightweight token estimate for the malformed message.
+- Missing `stopReason` defaults to `stop`.
+
+Implementation:
+
+- `normalizeAssistantUsage` in `src/agents/pi-embedded-runner/google.ts`
+- Applied in `sanitizeSessionHistory` in `src/agents/pi-embedded-runner/google.ts`
+
+Operational scanner:
+
+- `scripts/transcript-health-check.ts` detects malformed assistant transcript entries.
 
 ---
 

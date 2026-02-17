@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ReplyPayload } from "../auto-reply/types.js";
@@ -12,6 +15,7 @@ import {
 } from "../agents/agent-scope.js";
 import { resolveUserTimezone } from "../agents/date-time.js";
 import { resolveEffectiveMessagesConfig } from "../agents/identity.js";
+import { resolveSessionLane } from "../agents/pi-embedded-runner/lanes.js";
 import { DEFAULT_HEARTBEAT_FILENAME } from "../agents/workspace.js";
 import {
   DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
@@ -525,6 +529,15 @@ export async function runHeartbeatOnce(opts: {
   }
 
   const { entry, sessionKey, storePath } = resolveHeartbeatSession(cfg, agentId, heartbeat);
+
+  // Skip heartbeat if the target session lane already has work queued (e.g. user messages).
+  // This prevents heartbeat from blocking higher-priority user interactions.
+  const sessionLane = resolveSessionLane(sessionKey);
+  const sessionQueueSize = (opts.deps?.getQueueSize ?? getQueueSize)(sessionLane);
+  if (sessionQueueSize > 0) {
+    return { status: "skipped", reason: "session-busy" };
+  }
+
   const previousUpdatedAt = entry?.updatedAt;
   const delivery = resolveHeartbeatDeliveryTarget({ cfg, entry, heartbeat });
   const visibility =
@@ -593,8 +606,16 @@ export async function runHeartbeatOnce(opts: {
     return true;
   };
 
+  // Create a preemptable AbortController so the session lane can abort this
+  // heartbeat run when higher-priority work (user messages) arrives.
+  const heartbeatAbort = new AbortController();
+
   try {
-    const replyResult = await getReplyFromConfig(ctx, { isHeartbeat: true }, cfg);
+    const replyResult = await getReplyFromConfig(
+      ctx,
+      { isHeartbeat: true, abortSignal: heartbeatAbort.signal, preemptable: heartbeatAbort },
+      cfg,
+    );
     const replyPayload = resolveHeartbeatReplyPayload(replyResult);
     const includeReasoning = heartbeat?.includeReasoning === true;
     const reasoningPayloads = includeReasoning
@@ -791,6 +812,21 @@ export async function runHeartbeatOnce(opts: {
     });
     return { status: "ran", durationMs: Date.now() - startedAt };
   } catch (err) {
+    // When the heartbeat was preempted by higher-priority work (user message
+    // enqueued on the same session lane), treat it as a skip rather than a failure.
+    if (heartbeatAbort.signal.aborted) {
+      const reason = "preempted";
+      emitHeartbeatEvent({
+        status: "skipped",
+        reason,
+        durationMs: Date.now() - startedAt,
+        channel: delivery.channel !== "none" ? delivery.channel : undefined,
+      });
+      log.info(`heartbeat preempted by higher-priority work`);
+      // Restore updatedAt so the preempted heartbeat doesn't shift the session timestamp.
+      await restoreHeartbeatUpdatedAt({ storePath, sessionKey, updatedAt: previousUpdatedAt });
+      return { status: "skipped", reason };
+    }
     const reason = formatErrorMessage(err);
     emitHeartbeatEvent({
       status: "failed",
@@ -932,7 +968,10 @@ export function startHeartbeatRunner(opts: {
         reason,
         deps: { runtime: state.runtime },
       });
-      if (res.status === "skipped" && res.reason === "requests-in-flight") {
+      if (
+        res.status === "skipped" &&
+        (res.reason === "requests-in-flight" || res.reason === "session-busy")
+      ) {
         return res;
       }
       if (res.status !== "skipped" || res.reason !== "disabled") {

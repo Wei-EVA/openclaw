@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { HumanDelayConfig } from "../../config/types.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import type { ResponsePrefixContext } from "./response-prefix-template.js";

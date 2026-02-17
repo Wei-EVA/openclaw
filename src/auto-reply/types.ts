@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { ImageContent } from "@mariozechner/pi-ai";
 import type { TypingController } from "./reply/typing.js";
 
@@ -18,6 +21,9 @@ export type GetReplyOptions = {
   runId?: string;
   /** Abort signal for the underlying agent run. */
   abortSignal?: AbortSignal;
+  /** Marks this run as preemptable on the session lane (e.g. heartbeat).
+   *  Higher-priority work enqueuing on the same lane will abort this controller. */
+  preemptable?: AbortController;
   /** Optional inbound images (used for webchat attachments). */
   images?: ImageContent[];
   /** Notifies when an agent run actually starts (useful for webchat command handling). */

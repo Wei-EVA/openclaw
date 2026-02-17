@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { WebChannelStatus, WebInboundMsg, WebMonitorTuning } from "./types.js";
 import { hasControlCommand } from "../../auto-reply/command-detection.js";
 import { resolveInboundDebounceMs } from "../../auto-reply/inbound-debounce.js";

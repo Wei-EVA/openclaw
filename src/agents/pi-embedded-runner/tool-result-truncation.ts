@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE for details.
+
 /**
  * Tool result truncation utilities for recovering from context overflow
  * caused by oversized tool results (e.g., reading a huge file or `gh pr diff`).

@@ -1,3 +1,6 @@
+// Modifications copyright (c) 2024-2026 Tianwei Zhou. All rights reserved.
+// Original work copyright OpenClaw contributors, licensed under AGPL-3.0.
+
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { SessionManager } from "@mariozechner/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -182,6 +185,79 @@ describe("sanitizeSessionHistory", () => {
     expect(result.map((msg) => msg.role)).toEqual(["user"]);
   });
 
+  it("synthesizes assistant usage and stopReason when missing", async () => {
+    const messages: AgentMessage[] = [
+      {
+        role: "assistant",
+        stopReason: "stop",
+        usage: {
+          input: 3,
+          output: 10,
+          cacheRead: 12,
+          cacheWrite: 0,
+          totalTokens: 25,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        content: [{ type: "text", text: "baseline" }],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "manual backfill without usage metadata" }],
+      },
+    ];
+
+    const result = await sanitizeSessionHistory({
+      messages,
+      modelApi: "anthropic-messages",
+      provider: "anthropic",
+      sessionManager: mockSessionManager,
+      sessionId: "test-session",
+    });
+
+    const repaired = result[1] as AgentMessage & {
+      usage?: {
+        input?: number;
+        output?: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+        totalTokens?: number;
+      };
+      stopReason?: string;
+    };
+    expect(repaired.role).toBe("assistant");
+    expect(repaired.stopReason).toBe("stop");
+    expect(typeof repaired.usage?.totalTokens).toBe("number");
+    expect((repaired.usage?.totalTokens ?? 0) > 25).toBe(true);
+  });
+
+  it("keeps complete assistant usage unchanged", async () => {
+    const messages: AgentMessage[] = [
+      {
+        role: "assistant",
+        stopReason: "stop",
+        usage: {
+          input: 1,
+          output: 2,
+          cacheRead: 3,
+          cacheWrite: 4,
+          totalTokens: 10,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        content: [{ type: "text", text: "ok" }],
+      },
+    ];
+
+    const result = await sanitizeSessionHistory({
+      messages,
+      modelApi: "anthropic-messages",
+      provider: "anthropic",
+      sessionManager: mockSessionManager,
+      sessionId: "test-session",
+    });
+
+    expect(result).toEqual(messages);
+  });
+
   it("does not downgrade openai reasoning when the model has not changed", async () => {
     const sessionEntries: Array<{ type: string; customType: string; data: unknown }> = [
       {
@@ -223,7 +299,16 @@ describe("sanitizeSessionHistory", () => {
       sessionId: "test-session",
     });
 
-    expect(result).toEqual(messages);
+    expect(result).toHaveLength(1);
+    const assistant = result[0] as AgentMessage & {
+      usage?: { totalTokens?: number };
+      stopReason?: string;
+      content?: unknown;
+    };
+    expect(assistant.role).toBe("assistant");
+    expect(assistant.content).toEqual(messages[0]?.content);
+    expect(assistant.stopReason).toBe("stop");
+    expect(typeof assistant.usage?.totalTokens).toBe("number");
   });
 
   it("downgrades openai reasoning only when the model changes", async () => {
