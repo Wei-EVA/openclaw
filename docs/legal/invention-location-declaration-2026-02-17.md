@@ -8,6 +8,12 @@ No substantive portion of the inventive work was performed in the People's Repub
 
 No data originating from within China was used in the development of this invention.
 
+Project development period: 2024-2026
+
+Development owner: Tianwei Zhou
+
+Intellectual property owner: Tianwei Zhou
+
 Date: 2026-02-17
 
 Signed: Tianwei Zhou
