@@ -139,7 +139,31 @@ describe("runReplyAgent typing (heartbeat)", () => {
       await fs.mkdir(path.dirname(storePath), { recursive: true });
       await fs.writeFile(storePath, JSON.stringify(sessionStore), "utf-8");
       await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
-      await fs.writeFile(transcriptPath, "ok", "utf-8");
+      await fs.writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({ type: "session", id: sessionId, version: 1 }),
+          JSON.stringify({
+            type: "message",
+            message: {
+              role: "user",
+              content: [
+                { type: "text", text: "We already completed Starlight and maths homework." },
+              ],
+            },
+          }),
+          JSON.stringify({
+            type: "message",
+            message: {
+              role: "assistant",
+              content: [
+                { type: "text", text: "Great, let's continue with vocabulary and Gaeilge." },
+              ],
+            },
+          }),
+        ].join("\n"),
+        "utf-8",
+      );
 
       runEmbeddedPiAgentMock.mockImplementationOnce(async () => {
         throw new Error(
@@ -162,9 +186,12 @@ describe("runReplyAgent typing (heartbeat)", () => {
       });
       expect(payload.text?.toLowerCase()).toContain("reset");
       expect(sessionStore.main.sessionId).not.toBe(sessionId);
+      expect(sessionStore.main.compactionRecoveryNote).toContain("Compaction recovery checkpoint");
+      expect(sessionStore.main.compactionRecoveryApplied).toBe(false);
 
       const persisted = JSON.parse(await fs.readFile(storePath, "utf-8"));
       expect(persisted.main.sessionId).toBe(sessionStore.main.sessionId);
+      expect(typeof persisted.main.compactionRecoveryNote).toBe("string");
     } finally {
       if (prevStateDir) {
         process.env.OPENCLAW_STATE_DIR = prevStateDir;

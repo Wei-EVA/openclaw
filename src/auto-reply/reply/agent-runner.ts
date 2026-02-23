@@ -38,6 +38,7 @@ import { resolveBlockStreamingCoalescing } from "./block-streaming.js";
 import { createFollowupRunner } from "./followup-runner.js";
 import { enqueueFollowupRun, type FollowupRun, type QueueSettings } from "./queue.js";
 import { createReplyToModeFilterForChannel, resolveReplyToMode } from "./reply-threading.js";
+import { buildCompactionRecoveryNote } from "./session-recovery.js";
 import { incrementCompactionCount } from "./session-updates.js";
 import { persistSessionUsageUpdate } from "./session-usage.js";
 import { createTypingSignaler } from "./typing-mode.js";
@@ -244,6 +245,16 @@ export async function runReplyAgent(params: {
     if (!prevEntry) {
       return false;
     }
+    const agentId = resolveAgentIdFromSessionKey(sessionKey);
+    const prevSessionFile = resolveSessionFilePath(prevEntry.sessionId, prevEntry, { agentId });
+    const recoveryNote =
+      failureLabel === "compaction failure"
+        ? await buildCompactionRecoveryNote({
+            sessionFile: prevSessionFile,
+            latestUserPrompt: commandBody,
+          })
+        : undefined;
+    const recoveryCapturedAt = recoveryNote ? Date.now() : undefined;
     const prevSessionId = cleanupTranscripts ? prevEntry.sessionId : undefined;
     const nextSessionId = crypto.randomUUID();
     const nextEntry: SessionEntry = {
@@ -252,8 +263,11 @@ export async function runReplyAgent(params: {
       updatedAt: Date.now(),
       systemSent: false,
       abortedLastRun: false,
+      compactionRecoveryNote: recoveryNote,
+      compactionRecoveryAt: recoveryCapturedAt,
+      compactionRecoverySourceSessionId: recoveryNote ? prevEntry.sessionId : undefined,
+      compactionRecoveryApplied: recoveryNote ? false : undefined,
     };
-    const agentId = resolveAgentIdFromSessionKey(sessionKey);
     const nextSessionFile = resolveSessionTranscriptPath(
       nextSessionId,
       agentId,

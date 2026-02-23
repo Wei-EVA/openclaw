@@ -76,6 +76,11 @@ export type SessionEntry = {
   compactionCount?: number;
   memoryFlushAt?: number;
   memoryFlushCompactionCount?: number;
+  /** One-shot recovery checkpoint captured before a compaction-failure reset. */
+  compactionRecoveryNote?: string;
+  compactionRecoveryAt?: number;
+  compactionRecoverySourceSessionId?: string;
+  compactionRecoveryApplied?: boolean;
   cliSessionIds?: Record<string, string>;
   claudeCliSessionId?: string;
   label?: string;

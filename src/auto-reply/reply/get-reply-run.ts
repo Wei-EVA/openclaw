@@ -180,7 +180,6 @@ export async function runPreparedReply(
       })
     : "";
   const groupSystemPrompt = sessionCtx.GroupSystemPrompt?.trim() ?? "";
-  const extraSystemPrompt = [groupIntro, groupSystemPrompt].filter(Boolean).join("\n\n");
   const baseBody = sessionCtx.BodyStripped ?? sessionCtx.Body ?? "";
   // Use CommandBody/RawBody for bare reset detection (clean message without structural context).
   const rawBodyTrimmed = (ctx.CommandBody ?? ctx.RawBody ?? ctx.Body ?? "").trim();
@@ -247,6 +246,21 @@ export async function runPreparedReply(
   currentSystemSent = skillResult.systemSent;
   const skillsSnapshot = skillResult.skillsSnapshot;
   const prefixedBody = [threadStarterNote, prefixedBodyBase].filter(Boolean).join("\n\n");
+  const extraSystemPromptParts: string[] = [groupIntro, groupSystemPrompt].filter(Boolean);
+  if (sessionEntry?.compactionRecoveryNote && sessionEntry.compactionRecoveryApplied !== true) {
+    extraSystemPromptParts.push(sessionEntry.compactionRecoveryNote);
+    sessionEntry.compactionRecoveryApplied = true;
+    sessionEntry.updatedAt = Date.now();
+    if (sessionStore && sessionKey) {
+      sessionStore[sessionKey] = sessionEntry;
+    }
+    if (storePath && sessionStore && sessionKey) {
+      await updateSessionStore(storePath, (store) => {
+        store[sessionKey] = sessionEntry;
+      });
+    }
+  }
+  const extraSystemPrompt = extraSystemPromptParts.join("\n\n");
   const mediaNote = buildInboundMediaNote(ctx);
   const mediaReplyHint = mediaNote
     ? "To send an image back, prefer the message tool (media/path/filePath). If you must inline, use MEDIA:https://example.com/image.jpg (spaces ok, quote if needed) or a safe relative path like MEDIA:./image.jpg. Avoid absolute paths (MEDIA:/...) and ~ paths — they are blocked for security. Keep caption in the text body."
