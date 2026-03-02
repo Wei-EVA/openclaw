@@ -12,6 +12,7 @@ import {
   logSessionStateChange,
 } from "../../logging/diagnostic.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
+import { runOutboundSafetyShadow } from "../../safety/guards/outbound.js";
 import { maybeApplyTtsToPayload, normalizeTtsAutoMode, resolveTtsConfig } from "../../tts/tts.js";
 import { getReplyFromConfig } from "../reply.js";
 import { formatAbortReplyText, tryFastAbortFromMessage } from "./abort.js";
@@ -51,6 +52,16 @@ const isInboundAudioContext = (ctx: FinalizedMsgContext): boolean => {
     return true;
   }
   return AUDIO_HEADER_RE.test(trimmed);
+};
+
+const collectOutboundUrls = (payload: ReplyPayload): string[] => {
+  if (Array.isArray(payload.mediaUrls) && payload.mediaUrls.length > 0) {
+    return payload.mediaUrls.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (typeof payload.mediaUrl === "string" && payload.mediaUrl.trim()) {
+    return [payload.mediaUrl];
+  }
+  return [];
 };
 
 const resolveSessionTtsAuto = (
@@ -210,6 +221,7 @@ export async function dispatchReplyFromConfig(params: {
   const shouldRouteToOriginating =
     isRoutableChannel(originatingChannel) && originatingTo && originatingChannel !== currentSurface;
   const ttsChannel = shouldRouteToOriginating ? originatingChannel : currentSurface;
+  const safetyAgentId = sessionKey ? resolveSessionAgentId({ sessionKey, config: cfg }) : undefined;
 
   /**
    * Helper to send a payload via route-reply (async).
@@ -308,6 +320,23 @@ export async function dispatchReplyFromConfig(params: {
                     inboundAudio,
                     ttsAuto: sessionTtsAuto,
                   });
+                  if (!shouldRouteToOriginating) {
+                    void runOutboundSafetyShadow({
+                      config: cfg,
+                      text: ttsPayload.text ?? "",
+                      urls: collectOutboundUrls(ttsPayload),
+                      channel: ttsChannel,
+                      accountId: ctx.AccountId,
+                      sessionKey,
+                      agentId: safetyAgentId,
+                      to: ctx.To ?? ctx.OriginatingTo ?? ctx.From,
+                      stage: "dispatcher_tool",
+                    }).catch((err) => {
+                      logVerbose(
+                        `dispatch-from-config: outbound safety shadow failed (tool): ${err instanceof Error ? err.message : String(err)}`,
+                      );
+                    });
+                  }
                   if (shouldRouteToOriginating) {
                     await sendPayloadAsync(ttsPayload, undefined, false);
                   } else {
@@ -335,6 +364,23 @@ export async function dispatchReplyFromConfig(params: {
               inboundAudio,
               ttsAuto: sessionTtsAuto,
             });
+            if (!shouldRouteToOriginating) {
+              void runOutboundSafetyShadow({
+                config: cfg,
+                text: ttsPayload.text ?? "",
+                urls: collectOutboundUrls(ttsPayload),
+                channel: ttsChannel,
+                accountId: ctx.AccountId,
+                sessionKey,
+                agentId: safetyAgentId,
+                to: ctx.To ?? ctx.OriginatingTo ?? ctx.From,
+                stage: "dispatcher_block",
+              }).catch((err) => {
+                logVerbose(
+                  `dispatch-from-config: outbound safety shadow failed (block): ${err instanceof Error ? err.message : String(err)}`,
+                );
+              });
+            }
             if (shouldRouteToOriginating) {
               await sendPayloadAsync(ttsPayload, context?.abortSignal, false);
             } else {
@@ -360,6 +406,23 @@ export async function dispatchReplyFromConfig(params: {
         inboundAudio,
         ttsAuto: sessionTtsAuto,
       });
+      if (!shouldRouteToOriginating) {
+        void runOutboundSafetyShadow({
+          config: cfg,
+          text: ttsReply.text ?? "",
+          urls: collectOutboundUrls(ttsReply),
+          channel: ttsChannel,
+          accountId: ctx.AccountId,
+          sessionKey,
+          agentId: safetyAgentId,
+          to: ctx.To ?? ctx.OriginatingTo ?? ctx.From,
+          stage: "dispatcher_final",
+        }).catch((err) => {
+          logVerbose(
+            `dispatch-from-config: outbound safety shadow failed (final): ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
       if (shouldRouteToOriginating && originatingChannel && originatingTo) {
         // Route final reply to originating channel.
         const result = await routeReply({

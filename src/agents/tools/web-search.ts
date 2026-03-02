@@ -2,6 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { AnyAgentTool } from "./common.js";
 import { formatCliCommand } from "../../cli/command-format.js";
+import { runToolSafetyShadow } from "../../safety/guards/tool.js";
 import { wrapWebContent } from "../../security/external-content.js";
 import { jsonResult, readNumberParam, readStringParam } from "./common.js";
 import {
@@ -634,6 +635,30 @@ async function runWebSearch(params: {
   return payload;
 }
 
+function collectSearchResultUrls(result: Record<string, unknown>): string[] {
+  const urls: string[] = [];
+  if (Array.isArray(result.results)) {
+    for (const entry of result.results) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+      const candidate = (entry as { url?: unknown }).url;
+      if (typeof candidate === "string" && candidate.trim()) {
+        urls.push(candidate);
+      }
+    }
+  }
+  const citations = result.citations;
+  if (Array.isArray(citations)) {
+    for (const citation of citations) {
+      if (typeof citation === "string" && citation.trim()) {
+        urls.push(citation);
+      }
+    }
+  }
+  return [...new Set(urls)];
+}
+
 export function createWebSearchTool(options?: {
   config?: OpenClawConfig;
   sandboxed?: boolean;
@@ -674,6 +699,14 @@ export function createWebSearchTool(options?: {
       }
       const params = args as Record<string, unknown>;
       const query = readStringParam(params, "query", { required: true });
+      await runToolSafetyShadow({
+        config: options?.config ?? {},
+        toolName: "web_search",
+        stage: "query",
+        text: query,
+      }).catch(() => {
+        // Child-safety P0 shadow must never block tool execution.
+      });
       const count =
         readNumberParam(params, "count", { integer: true }) ?? search?.maxResults ?? undefined;
       const country = readStringParam(params, "country");
@@ -715,6 +748,15 @@ export function createWebSearchTool(options?: {
         perplexityModel: resolvePerplexityModel(perplexityConfig),
         grokModel: resolveGrokModel(grokConfig),
         grokInlineCitations: resolveGrokInlineCitations(grokConfig),
+      });
+      await runToolSafetyShadow({
+        config: options?.config ?? {},
+        toolName: "web_search",
+        stage: "result",
+        text: typeof result.content === "string" ? result.content : "",
+        urls: collectSearchResultUrls(result),
+      }).catch(() => {
+        // Child-safety P0 shadow must never block tool execution.
       });
       return jsonResult(result);
     },

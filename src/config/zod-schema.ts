@@ -269,6 +269,25 @@ export const OpenClawSchema = z
     models: ModelsConfigSchema,
     nodeHost: NodeHostSchema,
     agents: AgentsSchema,
+    childSafety: z
+      .object({
+        enabled: z.boolean().optional(),
+        mode: z.union([z.literal("shadow"), z.literal("advisory"), z.literal("active")]).optional(),
+        ageBand: z.string().optional(),
+        riskThresholds: z
+          .object({
+            blockAbove: z.number().min(0).max(1).optional(),
+            rewriteAbove: z.number().min(0).max(1).optional(),
+            escalateAbove: z.number().min(0).max(1).optional(),
+          })
+          .strict()
+          .optional(),
+        allowedDomains: z.array(z.string()).optional(),
+        blockedCategories: z.array(z.string()).optional(),
+        logPassEvents: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
     tools: ToolsSchema,
     bindings: BindingsSchema,
     broadcast: BroadcastSchema,

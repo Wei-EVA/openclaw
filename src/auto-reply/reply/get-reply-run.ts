@@ -23,6 +23,7 @@ import {
 import { logVerbose } from "../../globals.js";
 import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
 import { normalizeMainKey } from "../../routing/session-key.js";
+import { runInboundSafetyShadow } from "../../safety/guards/inbound.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { hasControlCommand } from "../command-detection.js";
 import { buildInboundMediaNote } from "../media-note.js";
@@ -183,6 +184,18 @@ export async function runPreparedReply(
   const baseBody = sessionCtx.BodyStripped ?? sessionCtx.Body ?? "";
   // Use CommandBody/RawBody for bare reset detection (clean message without structural context).
   const rawBodyTrimmed = (ctx.CommandBody ?? ctx.RawBody ?? ctx.Body ?? "").trim();
+  if (rawBodyTrimmed) {
+    void runInboundSafetyShadow({
+      config: cfg,
+      text: rawBodyTrimmed,
+      channel: (sessionCtx.Provider ?? sessionCtx.Surface ?? ctx.OriginatingChannel)?.toLowerCase(),
+      accountId: ctx.AccountId,
+      sessionKey,
+      agentId,
+      to: sessionCtx.OriginatingTo ?? sessionCtx.To ?? sessionCtx.From,
+      stage: "run_prepared_reply",
+    });
+  }
   const baseBodyTrimmedRaw = baseBody.trim();
   if (
     allowTextCommands &&

@@ -80,6 +80,19 @@ export type OpenClawConfig = {
   models?: ModelsConfig;
   nodeHost?: NodeHostConfig;
   agents?: AgentsConfig;
+  childSafety?: {
+    enabled?: boolean;
+    mode?: "shadow" | "advisory" | "active";
+    ageBand?: string;
+    riskThresholds?: {
+      blockAbove?: number;
+      rewriteAbove?: number;
+      escalateAbove?: number;
+    };
+    allowedDomains?: string[];
+    blockedCategories?: string[];
+    logPassEvents?: boolean;
+  };
   tools?: ToolsConfig;
   bindings?: AgentBinding[];
   broadcast?: BroadcastConfig;

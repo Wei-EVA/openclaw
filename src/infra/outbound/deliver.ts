@@ -21,6 +21,7 @@ import {
   appendAssistantMessageToSessionTranscript,
   resolveMirroredTranscriptText,
 } from "../../config/sessions.js";
+import { runOutboundSafetyShadow } from "../../safety/guards/outbound.js";
 import { markdownToSignalTextChunks, type SignalTextStyleRange } from "../../signal/format.js";
 import { sendMessageSignal } from "../../signal/send.js";
 import { normalizeReplyPayloadsForDelivery } from "./payloads.js";
@@ -326,6 +327,21 @@ export async function deliverOutboundPayloads(params: {
     };
     try {
       throwIfAborted(abortSignal);
+      try {
+        await runOutboundSafetyShadow({
+          config: cfg,
+          text: payloadSummary.text,
+          urls: payloadSummary.mediaUrls,
+          channel,
+          accountId,
+          sessionKey: params.mirror?.sessionKey,
+          agentId: params.mirror?.agentId,
+          to,
+          stage: "deliver",
+        });
+      } catch {
+        // Child-safety P0 shadow must never interrupt delivery.
+      }
       params.onPayload?.(payloadSummary);
       if (handler.sendPayload && payload.channelData) {
         results.push(await handler.sendPayload(payload));
