@@ -308,4 +308,84 @@ describe("runReplyAgent typing (heartbeat)", () => {
       }
     }
   });
+
+  it("captures a one-shot recovery checkpoint after successful auto-compaction", async () => {
+    const prevStateDir = process.env.OPENCLAW_STATE_DIR;
+    const stateDir = await fs.mkdtemp(
+      path.join(tmpdir(), "openclaw-session-compaction-checkpoint-"),
+    );
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    try {
+      const sessionId = "session";
+      const storePath = path.join(stateDir, "sessions", "sessions.json");
+      const transcriptPath = sessions.resolveSessionTranscriptPath(sessionId);
+      const sessionEntry = { sessionId, updatedAt: Date.now(), sessionFile: transcriptPath };
+      const sessionStore = { main: sessionEntry };
+
+      await fs.mkdir(path.dirname(storePath), { recursive: true });
+      await fs.writeFile(storePath, JSON.stringify(sessionStore), "utf-8");
+      await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
+      await fs.writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({ type: "session", id: sessionId, version: 1 }),
+          JSON.stringify({
+            type: "message",
+            message: {
+              role: "user",
+              content: [{ type: "text", text: "We already completed homework and vocabulary." }],
+            },
+          }),
+          JSON.stringify({
+            type: "message",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "Great, next is L4/L5 maths and reading." }],
+            },
+          }),
+        ].join("\n"),
+        "utf-8",
+      );
+
+      runEmbeddedPiAgentMock.mockImplementationOnce(async (params: unknown) => {
+        const runParams = params as {
+          onAgentEvent?: (evt: {
+            stream: string;
+            data: { phase?: string; willRetry?: boolean };
+          }) => void;
+        };
+        runParams.onAgentEvent?.({
+          stream: "compaction",
+          data: { phase: "end", willRetry: false },
+        });
+        return {
+          payloads: [{ text: "ok" }],
+          meta: { durationMs: 1 },
+        };
+      });
+
+      const { run } = createMinimalRun({
+        sessionEntry,
+        sessionStore,
+        sessionKey: "main",
+        storePath,
+      });
+      const res = await run();
+      const payload = Array.isArray(res) ? res[0] : res;
+      expect(payload?.text).toContain("ok");
+      expect(sessionStore.main.compactionRecoveryNote).toContain("Compaction recovery checkpoint");
+      expect(sessionStore.main.compactionRecoveryApplied).toBe(false);
+      expect(sessionStore.main.compactionRecoverySourceSessionId).toBe(sessionId);
+
+      const persisted = JSON.parse(await fs.readFile(storePath, "utf-8"));
+      expect(typeof persisted.main.compactionRecoveryNote).toBe("string");
+      expect(persisted.main.compactionRecoveryApplied).toBe(false);
+    } finally {
+      if (prevStateDir) {
+        process.env.OPENCLAW_STATE_DIR = prevStateDir;
+      } else {
+        delete process.env.OPENCLAW_STATE_DIR;
+      }
+    }
+  });
 });

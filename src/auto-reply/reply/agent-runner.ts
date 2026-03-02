@@ -515,6 +515,43 @@ export async function runReplyAgent(params: {
         sessionKey,
         storePath,
       });
+      if (sessionKey && storePath) {
+        const agentId = resolveAgentIdFromSessionKey(sessionKey);
+        const sessionFile =
+          resolveSessionFilePath(followupRun.run.sessionId, activeSessionEntry, { agentId }) ??
+          followupRun.run.sessionFile;
+        const recoveryNote = await buildCompactionRecoveryNote({
+          sessionFile,
+          latestUserPrompt: commandBody,
+        });
+        if (recoveryNote) {
+          try {
+            const updatedEntry = await updateSessionStoreEntry({
+              storePath,
+              sessionKey,
+              update: async (entry) => {
+                if (entry.compactionRecoveryNote && entry.compactionRecoveryApplied !== true) {
+                  return {};
+                }
+                return {
+                  compactionRecoveryNote: recoveryNote,
+                  compactionRecoveryAt: Date.now(),
+                  compactionRecoverySourceSessionId: entry.sessionId,
+                  compactionRecoveryApplied: false,
+                };
+              },
+            });
+            if (updatedEntry) {
+              activeSessionEntry = updatedEntry;
+              if (activeSessionStore) {
+                activeSessionStore[sessionKey] = updatedEntry;
+              }
+            }
+          } catch {
+            // Recovery checkpoint is best effort and should never block replies.
+          }
+        }
+      }
       if (verboseEnabled) {
         const suffix = typeof count === "number" ? ` (count ${count})` : "";
         finalPayloads = [{ text: `🧹 Auto-compaction complete${suffix}.` }, ...finalPayloads];
