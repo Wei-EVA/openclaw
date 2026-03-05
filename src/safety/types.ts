@@ -20,7 +20,7 @@ export type ChildSafetyResolvedConfig = {
 
 export type SafetyDirection = "inbound" | "outbound" | "tool";
 
-export type SafetyAction = "pass" | "shadow_flag";
+export type SafetyAction = "pass" | "shadow_flag" | "block";
 
 export type SafetyRiskLevel = "low" | "medium" | "high";
 
@@ -30,7 +30,8 @@ export type SafetyCategory =
   | "self_harm"
   | "pii"
   | "prompt_injection"
-  | "external_domain";
+  | "external_domain"
+  | "story_lock";
 
 export type SafetyDetectionLayer = "L1_pattern" | "L1_url";
 

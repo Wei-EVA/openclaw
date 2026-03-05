@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import { signalOutbound } from "../../channels/plugins/outbound/signal.js";
@@ -26,13 +29,28 @@ vi.mock("../../config/sessions.js", async () => {
 });
 
 const { deliverOutboundPayloads, normalizeOutboundPayloads } = await import("./deliver.js");
+type MutableEnv = NodeJS.ProcessEnv & {
+  OPENCLAW_STORY_POLICY_PATH?: string;
+  OPENCLAW_STORY_PROGRESS_PATH?: string;
+};
+
+const STORY_LOCK_TEMPLATE =
+  "Story mode is locked until today's learning tasks are complete. Next step: <next task>.";
+
+async function writeJson(filePath: string, value: unknown): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify(value), "utf8");
+}
 
 describe("deliverOutboundPayloads", () => {
+  const env = process.env as MutableEnv;
   beforeEach(() => {
     setActivePluginRegistry(defaultRegistry);
   });
 
   afterEach(() => {
+    delete env.OPENCLAW_STORY_POLICY_PATH;
+    delete env.OPENCLAW_STORY_PROGRESS_PATH;
     setActivePluginRegistry(emptyRegistry);
   });
   it("chunks telegram markdown and passes through accountId", async () => {
@@ -354,6 +372,48 @@ describe("deliverOutboundPayloads", () => {
     expect(mocks.appendAssistantMessageToSessionTranscript).toHaveBeenCalledWith(
       expect.objectContaining({ text: "report.pdf" }),
     );
+  });
+
+  it("mirrors story-lock template instead of blocked raw story text", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "deliver-story-lock-"));
+    const policyPath = path.join(tempDir, "state-policy.json");
+    const progressPath = path.join(tempDir, "midterm-card-progress.json");
+    await writeJson(policyPath, { storyControl: { enabled: true } });
+    await writeJson(progressPath, { today: { allComplete: false } });
+    env.OPENCLAW_STORY_POLICY_PATH = policyPath;
+    env.OPENCLAW_STORY_PROGRESS_PATH = progressPath;
+
+    const sendTelegram = vi.fn().mockResolvedValue({ messageId: "m1", chatId: "c1" });
+    const cfg: OpenClawConfig = {
+      channels: { telegram: { botToken: "tok-1", textChunkLimit: 4000 } },
+    };
+    mocks.appendAssistantMessageToSessionTranscript.mockClear();
+
+    try {
+      await deliverOutboundPayloads({
+        cfg,
+        channel: "telegram",
+        to: "123",
+        payloads: [{ text: "Episode 39: Bruno and Nova enter the room." }],
+        deps: { sendTelegram },
+        mirror: {
+          sessionKey: "agent:learnlm:main",
+          agentId: "learnlm",
+          text: "Episode 39: Bruno and Nova enter the room.",
+        },
+      });
+
+      expect(sendTelegram).toHaveBeenCalledWith(
+        "123",
+        "Story mode is locked until today's learning tasks are complete. Next step: &lt;next task&gt;.",
+        expect.objectContaining({ verbose: false, textMode: "html" }),
+      );
+      expect(mocks.appendAssistantMessageToSessionTranscript).toHaveBeenCalledWith(
+        expect.objectContaining({ text: STORY_LOCK_TEMPLATE }),
+      );
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

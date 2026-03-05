@@ -21,7 +21,7 @@ import {
   appendAssistantMessageToSessionTranscript,
   resolveMirroredTranscriptText,
 } from "../../config/sessions.js";
-import { runOutboundSafetyShadow } from "../../safety/guards/outbound.js";
+import { runOutboundSafetyShadow, runOutboundStoryGate } from "../../safety/guards/outbound.js";
 import { markdownToSignalTextChunks, type SignalTextStyleRange } from "../../signal/format.js";
 import { sendMessageSignal } from "../../signal/send.js";
 import { normalizeReplyPayloadsForDelivery } from "./payloads.js";
@@ -319,12 +319,30 @@ export async function deliverOutboundPayloads(params: {
     };
   };
   const normalizedPayloads = normalizeReplyPayloadsForDelivery(payloads);
+  let mirrorOverrideText: string | undefined;
+  let mirrorOverrideMediaUrls: string[] | undefined;
   for (const payload of normalizedPayloads) {
-    const payloadSummary: NormalizedOutboundPayload = {
+    const storyGate = await runOutboundStoryGate({
+      config: cfg,
       text: payload.text ?? "",
-      mediaUrls: payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []),
+      channel,
+      accountId,
+      sessionKey: params.mirror?.sessionKey,
+      agentId: params.mirror?.agentId,
+      to,
+      stage: "deliver",
+    });
+    const payloadSummary: NormalizedOutboundPayload = {
+      text: storyGate.text,
+      mediaUrls: storyGate.blocked
+        ? []
+        : (payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : [])),
       channelData: payload.channelData,
     };
+    if (storyGate.blocked) {
+      mirrorOverrideText = payloadSummary.text;
+      mirrorOverrideMediaUrls = [];
+    }
     try {
       throwIfAborted(abortSignal);
       try {
@@ -337,14 +355,17 @@ export async function deliverOutboundPayloads(params: {
           sessionKey: params.mirror?.sessionKey,
           agentId: params.mirror?.agentId,
           to,
-          stage: "deliver",
+          stage: storyGate.blocked ? "deliver_story_gate_blocked" : "deliver",
         });
       } catch {
         // Child-safety P0 shadow must never interrupt delivery.
       }
       params.onPayload?.(payloadSummary);
       if (handler.sendPayload && payload.channelData) {
-        results.push(await handler.sendPayload(payload));
+        const payloadForSend = storyGate.blocked
+          ? { ...payload, text: payloadSummary.text, mediaUrl: undefined, mediaUrls: [] }
+          : payload;
+        results.push(await handler.sendPayload(payloadForSend));
         continue;
       }
       if (payloadSummary.mediaUrls.length === 0) {
@@ -376,8 +397,8 @@ export async function deliverOutboundPayloads(params: {
   }
   if (params.mirror && results.length > 0) {
     const mirrorText = resolveMirroredTranscriptText({
-      text: params.mirror.text,
-      mediaUrls: params.mirror.mediaUrls,
+      text: mirrorOverrideText ?? params.mirror.text,
+      mediaUrls: mirrorOverrideMediaUrls ?? params.mirror.mediaUrls,
     });
     if (mirrorText) {
       await appendAssistantMessageToSessionTranscript({
