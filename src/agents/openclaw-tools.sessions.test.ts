@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 const callGatewayMock = vi.fn();
@@ -323,7 +326,11 @@ describe("sessions tools", () => {
     expect(fire.details).toMatchObject({
       status: "accepted",
       runId: "run-1",
-      delivery: { status: "pending", mode: "announce" },
+      delivery: {
+        status: "accepted",
+        mode: "announce",
+        announceStatus: "pending",
+      },
     });
     await waitForCalls(() => calls.filter((call) => call.method === "agent").length, 4);
     await waitForCalls(() => calls.filter((call) => call.method === "agent.wait").length, 4);
@@ -338,7 +345,11 @@ describe("sessions tools", () => {
     expect(waited.details).toMatchObject({
       status: "ok",
       reply: "done",
-      delivery: { status: "pending", mode: "announce" },
+      delivery: {
+        status: "delivered",
+        mode: "announce",
+        announceStatus: "pending",
+      },
     });
     expect(typeof (waited.details as { runId?: string }).runId).toBe("string");
     await waitForCalls(() => calls.filter((call) => call.method === "agent").length, 8);
@@ -520,6 +531,11 @@ describe("sessions tools", () => {
     expect(waited.details).toMatchObject({
       status: "ok",
       reply: "initial",
+      delivery: {
+        status: "delivered",
+        mode: "announce",
+        announceStatus: "pending",
+      },
     });
     await sleep(0);
     await sleep(0);
@@ -547,5 +563,102 @@ describe("sessions tools", () => {
       channel: "discord",
       message: "announce now",
     });
+  });
+
+  it("sessions_send persists reward decisions sent to LearnLM", async () => {
+    callGatewayMock.mockReset();
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "reward-decision-state-"));
+    const statePath = path.join(tempDir, "reward-decision-state.json");
+    const originalPath = process.env.OPENCLAW_REWARD_DECISION_STATE_PATH;
+    process.env.OPENCLAW_REWARD_DECISION_STATE_PATH = statePath;
+
+    try {
+      callGatewayMock.mockImplementation(async (opts: unknown) => {
+        const request = opts as { method?: string; params?: Record<string, unknown> };
+        if (request.method === "agent") {
+          return { runId: "run-reward", acceptedAt: 123 };
+        }
+        if (request.method === "agent.wait") {
+          return { status: "ok" };
+        }
+        if (request.method === "chat.history") {
+          return { messages: [] };
+        }
+        return {};
+      });
+
+      const tool = createOpenClawTools({
+        agentSessionKey: "agent:learnlm:main",
+        agentChannel: "telegram",
+      }).find((candidate) => candidate.name === "sessions_send");
+      expect(tool).toBeDefined();
+      if (!tool) {
+        throw new Error("missing sessions_send tool");
+      }
+
+      await tool.execute("call8", {
+        sessionKey: "agent:learnlm:main",
+        message: "【REWARD_DECISION: DENIED】\n\nStill needed:\n- 12 more vocabulary words",
+        timeoutSeconds: 0,
+      });
+
+      const payload = JSON.parse(await fs.readFile(statePath, "utf8")) as {
+        today?: { status?: string; targetSessionKey?: string; requesterSessionKey?: string };
+      };
+      expect(payload.today).toMatchObject({
+        status: "denied",
+        targetSessionKey: "agent:learnlm:main",
+        requesterSessionKey: "agent:learnlm:main",
+      });
+    } finally {
+      if (originalPath == null) {
+        delete process.env.OPENCLAW_REWARD_DECISION_STATE_PATH;
+      } else {
+        process.env.OPENCLAW_REWARD_DECISION_STATE_PATH = originalPath;
+      }
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sessions_send does not persist reward decisions for other agents", async () => {
+    callGatewayMock.mockReset();
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "reward-decision-state-"));
+    const statePath = path.join(tempDir, "reward-decision-state.json");
+    const originalPath = process.env.OPENCLAW_REWARD_DECISION_STATE_PATH;
+    process.env.OPENCLAW_REWARD_DECISION_STATE_PATH = statePath;
+
+    try {
+      callGatewayMock.mockImplementation(async (opts: unknown) => {
+        const request = opts as { method?: string };
+        if (request.method === "agent") {
+          return { runId: "run-reward-other", acceptedAt: 123 };
+        }
+        return {};
+      });
+
+      const tool = createOpenClawTools({
+        agentSessionKey: "agent:learnlm:main",
+        agentChannel: "telegram",
+      }).find((candidate) => candidate.name === "sessions_send");
+      expect(tool).toBeDefined();
+      if (!tool) {
+        throw new Error("missing sessions_send tool");
+      }
+
+      await tool.execute("call9", {
+        sessionKey: "agent:math:main",
+        message: "【REWARD_DECISION: APPROVED】\n\nStory is approved.",
+        timeoutSeconds: 0,
+      });
+
+      await expect(fs.access(statePath)).rejects.toThrow();
+    } finally {
+      if (originalPath == null) {
+        delete process.env.OPENCLAW_REWARD_DECISION_STATE_PATH;
+      } else {
+        process.env.OPENCLAW_REWARD_DECISION_STATE_PATH = originalPath;
+      }
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   });
 });

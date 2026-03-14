@@ -3,6 +3,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "../../config/config.js";
+import {
+  readRewardDecisionState,
+  resolveRewardDecisionStatePath,
+} from "../../infra/reward-decision-state.js";
 import { resolveChildSafetyConfig } from "../config.js";
 import { recordSafetyEvent } from "../events.js";
 import { sampleContent } from "../normalize.js";
@@ -32,7 +36,7 @@ const STORY_SIGNALS: Array<{ key: string; regex: RegExp; score: number }> = [
 type StoryLockDecision = {
   text: string;
   blocked: boolean;
-  reason?: "all_complete_not_met";
+  reason?: "all_complete_not_met" | "reward_decision_denied";
   signals?: string[];
 };
 
@@ -51,6 +55,11 @@ let progressCache: {
   mtimeMs?: number;
   allComplete?: boolean;
   override?: StoryOverride;
+} = {};
+let rewardDecisionCache: {
+  path?: string;
+  mtimeMs?: number;
+  decision?: Awaited<ReturnType<typeof readRewardDecisionState>>;
 } = {};
 
 function resolveStoryPolicyPath(): string {
@@ -159,6 +168,24 @@ async function readStoryProgressSnapshot(filePath: string): Promise<{
   }
 }
 
+async function readRewardDecisionSnapshot(filePath: string) {
+  try {
+    const stat = await fs.stat(filePath);
+    if (rewardDecisionCache.path === filePath && rewardDecisionCache.mtimeMs === stat.mtimeMs) {
+      return rewardDecisionCache.decision ?? null;
+    }
+    const decision = await readRewardDecisionState(filePath);
+    rewardDecisionCache = {
+      path: filePath,
+      mtimeMs: stat.mtimeMs,
+      decision,
+    };
+    return decision;
+  } catch {
+    return null;
+  }
+}
+
 function collectStorySignals(text: string): Array<{ signal: string; score: number }> {
   const hits: Array<{ signal: string; score: number }> = [];
   for (const rule of STORY_SIGNALS) {
@@ -200,7 +227,22 @@ export async function runOutboundStoryGate(params: {
   }
 
   const progressPath = resolveStoryProgressPath();
+  const rewardDecisionPath = resolveRewardDecisionStatePath();
   const { allComplete, override } = await readStoryProgressSnapshot(progressPath);
+  const rewardDecision = await readRewardDecisionSnapshot(rewardDecisionPath);
+  if (rewardDecision?.status === "approved") {
+    return { text: params.text, blocked: false };
+  }
+  if (rewardDecision?.status === "denied") {
+    // This branch reflects an explicit parent decision, not a model safety finding,
+    // so we return the lock template without logging a separate safety event.
+    return {
+      text: STORY_LOCK_TEMPLATE,
+      blocked: true,
+      reason: "reward_decision_denied",
+      signals: signalHits.map((hit) => hit.signal),
+    };
+  }
   if (allComplete || override.allowed) {
     return { text: params.text, blocked: false };
   }
@@ -283,4 +325,5 @@ export async function runOutboundSafetyShadow(params: {
 export function resetStoryGateCacheForTest(): void {
   policyCache = {};
   progressCache = {};
+  rewardDecisionCache = {};
 }

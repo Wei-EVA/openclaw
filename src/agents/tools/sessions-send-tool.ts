@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import type { AnyAgentTool } from "./common.js";
 import { loadConfig } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
+import { persistRewardDecisionState } from "../../infra/reward-decision-state.js";
 import {
   isSubagentSessionKey,
   normalizeAgentId,
@@ -264,7 +265,6 @@ export function createSessionsSendTool(opts?: {
       const requesterSessionKey = opts?.agentSessionKey;
       const requesterChannel = opts?.agentChannel;
       const maxPingPongTurns = resolvePingPongTurns(cfg);
-      const delivery = { status: "pending", mode: "announce" as const };
       const startA2AFlow = (roundOneReply?: string, waitRunId?: string) => {
         void runSessionsSendA2AFlow({
           targetSessionKey: resolvedKey,
@@ -289,12 +289,27 @@ export function createSessionsSendTool(opts?: {
           if (typeof response?.runId === "string" && response.runId) {
             runId = response.runId;
           }
+          // LearnLM's story gate is the only current consumer of this shared state,
+          // so keep unrelated agents from mutating it until the protocol broadens.
+          if (targetAgentId === "learnlm") {
+            await persistRewardDecisionState({
+              message,
+              requesterSessionKey,
+              requesterChannel,
+              targetSessionKey: resolvedKey,
+              targetDisplayKey: displayKey,
+            });
+          }
           startA2AFlow(undefined, runId);
           return jsonResult({
             runId,
             status: "accepted",
             sessionKey: displayKey,
-            delivery,
+            delivery: {
+              status: "accepted",
+              mode: "announce" as const,
+              announceStatus: "pending" as const,
+            },
           });
         } catch (err) {
           const messageText =
@@ -316,6 +331,17 @@ export function createSessionsSendTool(opts?: {
         });
         if (typeof response?.runId === "string" && response.runId) {
           runId = response.runId;
+        }
+        // LearnLM's story gate is the only current consumer of this shared state,
+        // so keep unrelated agents from mutating it until the protocol broadens.
+        if (targetAgentId === "learnlm") {
+          await persistRewardDecisionState({
+            message,
+            requesterSessionKey,
+            requesterChannel,
+            targetSessionKey: resolvedKey,
+            targetDisplayKey: displayKey,
+          });
         }
       } catch (err) {
         const messageText =
@@ -383,7 +409,11 @@ export function createSessionsSendTool(opts?: {
         status: "ok",
         reply,
         sessionKey: displayKey,
-        delivery,
+        delivery: {
+          status: "delivered",
+          mode: "announce" as const,
+          announceStatus: "pending" as const,
+        },
       });
     },
   };
